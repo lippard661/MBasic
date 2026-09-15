@@ -1,0 +1,16 @@
+Revision history for MBasic
+
+1.0  2026-09-15
+     - Initial release.
+     - A dependency-free interpreter for the subset of Multics BASIC used by
+       the Explore game and its helpers.  Runs the authentic BASIC source
+       unmodified; fails loudly on any construct outside the implemented
+       subset.
+     - Run-time errors that Multics BASIC also reports use the authentic
+       Multics message text (per the AM82 error-message appendix).
+     - Components: Lexer, Parser, Expr, Env, Program, Linker, Executor, File,
+       Registry, Arg, Interp, plus the MBasic overview module.
+     - Run-time error messages follow the Multics BASIC manual error list
+       (AM82 Appendix E / MR 12.2 errata), including the verified behavior that
+       an out-of-range "on ... goto/gosub" is an error ("On evaluated out of
+       range") rather than a fall-through.
