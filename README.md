@@ -15,6 +15,19 @@ This distribution provides the interpreter library only.  The game itself is
 distributed separately (the "Explore" distribution), which registers its own
 native helpers and supplies the game data.
 
+INSTALLATION FROM OPENBSD PACKAGE
+
+The p5-MBasic-1.0.tgz file is a Legion of Dynamic Discord-signed
+OpenBSD package which can be installed on OpenBSD with pkg_add and can
+also be installed on macOS or Linux using my install.pl script which
+can be found in this repo:
+
+https://github.com/lippard661/distribute
+
+Ihe signing key is:
+
+https://www.discord.org/lippard/software/discord.org-2026-pkg.pub
+
 INSTALLATION
 
     perl Makefile.PL
