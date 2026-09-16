@@ -24,7 +24,7 @@ can be found in this repo:
 
 https://github.com/lippard661/distribute
 
-Ihe signing key is:
+Ihe public key for the signing key is:
 
 https://www.discord.org/lippard/software/discord.org-2026-pkg.pub
 
