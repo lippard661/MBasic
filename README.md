@@ -71,6 +71,23 @@ asc tst rnd cnt arg$.  Specials: usr$ dat$ clk$.
 
 Anything else is rejected with a message naming the line.
 
+OMITTED
+
+* def/fnend: user-defined functions (def fnx(a,b)..)
+* change: convert between string and numeric character array
+* change bit / bit operations
+* margin/margin-file: set output line width
+* print using/print-file-using/image: formatted output with format strings
+* mat read/input/print matrix operations
+* random access/keyed file operations
+* trig functions sin, cos, tan, atn, exp, log
+* matrix functions: det, inv, trn, con, zer
+* num - numeric input count used with mat input
+* user functions (fna-fnz); requires def
+* extended/double precision
+* full compiler diagnostics (e.g., doesn't enforce "end must be
+last statement")
+
 REQUIREMENTS
 
 Perl 5.8+; core modules only (Fcntl for the file locking used by builtins;
