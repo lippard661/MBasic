@@ -90,14 +90,29 @@ like(err(['10 print a$ + 0', '20 end']),
      qr/^Mixed string and numeric expression \(line 10\)/,
      'R2-4b BASIC-level type mismatch still reported at the BASIC line');
 
-# ==== R2-5: RNG is repeatable and matches Park-Miller (32-bit safe) ====
+# ==== R2-5: RNG is repeatable, 32-bit safe, and has no degenerate first draw ==
 {
     my $prog1 = ['10 for i=1 to 3', '20 print rnd', '30 next i', '40 end'];
     is(run($prog1), run($prog1), 'R2-5 rnd sequence repeats across runs');
-    my $e = MBasic::Env->new;                       # default seed 1
-    my $first = $e->rnd;
-    ok(abs($first - 16807/2147483647) < 1e-15,
-       'R2-5 first rnd is the canonical Park-Miller value (exact on 32-bit IVs)');
+
+    # the underlying Park-Miller/Schrage step is exact (this is the value that
+    # would be lost to double-rounding on a 32-bit-IV Perl if not for Schrage).
+    is(MBasic::Env::_rng_step({ seed => 1 }), 16807,
+       'R2-5 Park-Miller step is exact (seed 1 -> 16807, 32-bit safe)');
+
+    # the first *user-visible* draw is warmed, so it is NOT the degenerate tiny
+    # value that made int(6*rnd)+1 always land on 1.
+    my $first = MBasic::Env->new->rnd;
+    ok($first > 0.01, 'R2-5 first rnd is not the degenerate tiny opening value');
+
+    # first-draw outcomes across distinct seeds are varied (not all lowest).
+    my %seen;
+    for my $s (1..8) {
+        my $e = MBasic::Env->new(rng => MBasic::Env::_fresh_rng($s));
+        $seen{ int(6 * $e->rnd) + 1 } = 1;
+    }
+    ok(keys(%seen) > 1, 'R2-5 int(6*rnd)+1 first draw varies across seeds');
+
     my $bad = 0;
     my $e2 = MBasic::Env->new;
     for (1..1000) { my $x = $e2->rnd; $bad++ if $x < 0 || $x >= 1; }

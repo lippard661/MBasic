@@ -36,7 +36,13 @@ our $MAX_ARRAY_CELLS = 5_000_000;
 our $MAX_TOTAL_CELLS = 20_000_000;
 
 # Default RNG seed for a fresh program (repeatable across runs until RANDOMIZE).
-our $RNG_DEFAULT_SEED = 1;
+# A mid-range value, not 1: Park-Miller from a tiny seed yields a tiny opening
+# draw (16807/(2^31-1) ~= 7.8e-6), which would make the first random event of
+# every un-RANDOMIZEd run always take the lowest outcome.  We also discard the
+# first few draws when seeding (see _fresh_rng) so the opening value is well
+# mixed regardless of seed.
+our $RNG_DEFAULT_SEED = 471_634_512;   # warms to a mid-range first draw (~0.50)
+our $RNG_WARMUP       = 12;   # opening draws to discard when a stream is seeded
 
 sub new {
     my ($class, %opt) = @_;
@@ -53,8 +59,9 @@ sub new {
         # pseudo-random generator state.  Shared (by reference) with the
         # program's subroutine environments so the whole program draws from one
         # repeatable stream; see MBasic::Executor.  A fresh program starts from
-        # a fixed seed (repeatable across runs) unless `randomize` reseeds it.
-        rng     => $opt{rng} || { seed => $RNG_DEFAULT_SEED },
+        # a fixed (warmed) seed -- repeatable across runs -- unless RANDOMIZE
+        # reseeds it.
+        rng     => $opt{rng} || _fresh_rng($RNG_DEFAULT_SEED),
     }, $class;
     return $self;
 }
@@ -85,6 +92,18 @@ sub _rng_step {
     return $r->{seed} = $s;
 }
 
+# build a fresh RNG state from a seed: normalize into 1 .. M-1 and discard the
+# opening draws so the first user-visible value is well mixed even for a small
+# seed (avoids Park-Miller's degenerate tiny first output).
+sub _fresh_rng {
+    my ($seed) = @_;
+    $seed = int($seed) % (_RNG_M - 1);
+    $seed += 1 if $seed < 1;                 # -> 1 .. M-1, never 0
+    my $rng = { seed => $seed };
+    _rng_step($rng) for 1 .. $RNG_WARMUP;
+    return $rng;
+}
+
 # rnd -> a double in [0,1)
 sub rnd {
     my ($self) = @_;
@@ -101,7 +120,10 @@ sub randomize_seed {
     if (eval { require Time::HiRes; 1 }) { ($s, $us) = Time::HiRes::gettimeofday(); }
     my $mix = ($s & 0x7fffffff) ^ ($us & 0x7fffffff)
             ^ (($$ & 0x7fff) << 8) ^ ($self->{rng}{seed} & 0x7fffffff);
-    $self->{rng}{seed} = ($mix % (_RNG_M - 1)) + 1;   # -> 1 .. M-1, never 0
+    # reseed in place and warm the stream (so a small mixed seed doesn't yield
+    # a degenerate first draw), keeping the shared rng hashref that subs hold.
+    my $fresh = _fresh_rng($mix);
+    $self->{rng}{seed} = $fresh->{seed};
     return;
 }
 

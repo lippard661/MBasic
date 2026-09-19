@@ -73,7 +73,10 @@ Revision history for MBasic
        longer aborts the BASIC program on a misattributed line.
      - The RNG is now the Park-Miller minimal-standard generator via Schrage's
        method, so every intermediate stays under 2^31 and the sequence is exact
-       (and identical) even on a Perl built with 32-bit integers.
+       (and identical) even on a Perl built with 32-bit integers.  A fresh
+       stream is warmed (opening draws discarded) and the default seed is
+       mid-range, so the first draw of an un-RANDOMIZEd run is no longer the
+       degenerate tiny value that forced the lowest outcome.
      - The same sub defined in two different units on the search path is now
        rejected (previously it resolved silently by load order).
      - Array storage is capped in aggregate across all arrays, not only
