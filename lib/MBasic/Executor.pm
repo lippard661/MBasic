@@ -35,6 +35,25 @@ our $MAX_CALL_DEPTH = 500;
 # raise a run-time error with an authentic message plus the BASIC line number.
 sub _rt_line { my ($msg, $ln) = @_; die "$msg" . (defined $ln ? " (line $ln)" : "") . "\n"; }
 
+# Called from inside the $SIG{__WARN__} handler: was the numeric-coercion
+# warning raised by the interpreter's own expression/environment code (a BASIC
+# type error) rather than by a native builtin (the embedder's own code)?
+#
+# It is "ours" iff MBasic::Expr or MBasic::Env appears in the current call
+# stack.  Those packages perform arithmetic only while evaluating a BASIC
+# expression or assigning to a BASIC variable, so their presence marks a
+# BASIC-level type error.  A native builtin doing its own Perl arithmetic runs
+# with those frames already returned (the call arguments were evaluated and
+# popped before the builtin body executes), so neither package is on the stack
+# and the warning is left for the embedder's handler.
+sub _warn_from_interp {
+    for my $lvl (0 .. 200) {
+        my @c = caller($lvl) or last;
+        return 1 if $c[0] eq 'MBasic::Expr' || $c[0] eq 'MBasic::Env';
+    }
+    return 0;
+}
+
 # A RunState is the per-program-unit execution context.
 sub new_runstate {
     my ($class, %opt) = @_;
@@ -62,15 +81,28 @@ sub new_runstate {
 sub run_program {
     my ($class, $prog, %opt) = @_;
     my $rs = $class->new_runstate(program => $prog, %opt);
-    # Convert Perl's numeric-coercion warnings (which name interpreter internals
+    # Convert Perl's numeric-coercion warning (which names interpreter internals
     # and would otherwise leak to stderr while the statement silently proceeds
-    # with a wrong value) into an authentic BASIC error at the current line.
+    # with a wrong value) into an authentic BASIC error at the current line --
+    # but ONLY when the coercion happened inside the interpreter's own
+    # expression/environment code (MBasic::Expr / MBasic::Env).  A warning
+    # raised inside a native builtin (a registered Perl coderef) is the
+    # embedder's, not a BASIC type error, so it is passed through unchanged.
+    # Any warning we do not convert is delegated to whatever handler the
+    # embedder had installed (so their logging is not swallowed), or to the
+    # default if they had none.
+    my $prev = $SIG{__WARN__};
     local $SIG{__WARN__} = sub {
         my $w = shift;
-        if ($w =~ /isn't numeric/) {
+        if ($w =~ /isn't numeric/ && _warn_from_interp()) {
             _rt_line("Mixed string and numeric expression", $MBasic::Expr::LINE);
         }
-        CORE::warn($w);
+        if    (ref $prev eq 'CODE') { $prev->($w); }
+        elsif (defined $prev && $prev ne 'DEFAULT' && $prev ne 'IGNORE') {
+            # a handler named by string (e.g. 'main::handler')
+            no strict 'refs'; &{$prev}($w);
+        }
+        else { CORE::warn($w); }
     };
     $class->run_loop($rs);
     return $rs;

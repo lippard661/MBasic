@@ -219,13 +219,21 @@ C<pathxlate> that rejects absolute paths and C<..> when running untrusted input.
 
 =item *
 
-B<Writes are atomic and symlink-safe but not locked.>  Each file write is
-committed via a temp file plus C<rename>, so a crash or full disk never leaves a
-truncated file, and a planted symlink at the target is replaced rather than
-followed.  There is no multi-writer locking, however: the whole-file-rewrite
-model means concurrent writers can still lose updates.  Coordinating concurrent
-writers is the embedder's responsibility (Explore uses advisory locking around
-its shared files).
+B<Writes are crash-safe and resist symlink attacks, but are not locked.>  By
+default each write is committed via a temp file (created
+C<O_CREAT|O_EXCL|O_NOFOLLOW>, so a pre-planted temp name cannot redirect it)
+plus C<rename>, so a crash or full disk never leaves a truncated file, a planted
+symlink at the target is replaced rather than followed, and the target's
+permission bits (and, where the process may, its owner/group) are preserved
+across the replace.  When the containing directory is not writable but the
+target file is -- the shared-game layout Explore's installer sets up, the Unix
+analog of Multics per-segment ACLs -- MBasic falls back to rewriting the file
+in place (also C<O_NOFOLLOW>); this one path is not atomic.  There is no
+multi-writer locking in either mode: the whole-file-rewrite model means
+concurrent writers can still lose updates, and the atomic mode replaces the
+inode so a reader holding the file open must re-open by path to see changes.
+Coordinating concurrent writers is the embedder's responsibility (Explore uses
+advisory locking around its shared files).
 
 =item *
 
@@ -236,9 +244,10 @@ program can still consume CPU and memory up to those caps.
 
 =item *
 
-B<call names are validated.>  A C<call> target must be a bare identifier, so a
-call name cannot be used to traverse the filesystem or load an arbitrary
-C<.basic>-suffixed file from the search path.
+B<call names are validated.>  A C<call> target must be an identifier (optionally
+with a Multics C<segment$entrypoint> suffix), so a call name cannot be used to
+traverse the filesystem or load an arbitrary C<.basic>-suffixed file from the
+search path.
 
 =back
 

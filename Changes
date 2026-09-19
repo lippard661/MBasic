@@ -2,7 +2,7 @@ Revision history for MBasic
 
 1.1  2026-09-19
      Correctness and fidelity fixes from an external code review (Claude
-     Opus 5.0.
+     Opus 5.0).
 
      Correctness:
      - A zero-trip inner FOR (limit below start at run time) no longer leaks
@@ -57,7 +57,32 @@ Revision history for MBasic
        the last definition win.
      - resolve_call negatively caches unresolved names (no re-stat per call).
 
-     Tests: added t/08_review_fixes.t (regressions for every issue above).
+     Hardening from a second review pass (of the fixes above):
+     - File writes: the temp file is now created O_CREAT|O_EXCL|O_NOFOLLOW (a
+       predictable temp name can no longer be pre-planted as a symlink to
+       redirect the write), retrying past a colliding name; the target's
+       permission bits and (best-effort) owner/group are preserved across the
+       rename so a shared group-writable file stays writable; and when the
+       directory is not writable but the target file is (Explore's shared-game
+       layout -- writable segments in a read-only directory), MBasic falls back
+       to an in-place O_NOFOLLOW rewrite instead of failing.
+     - The numeric-coercion __WARN__ handler now delegates to any warn handler
+       the embedder had installed (instead of bypassing it) and only converts a
+       warning that arose in the interpreter's own expression/environment code;
+       a warning from inside a native builtin is left to the embedder and no
+       longer aborts the BASIC program on a misattributed line.
+     - The RNG is now the Park-Miller minimal-standard generator via Schrage's
+       method, so every intermediate stays under 2^31 and the sequence is exact
+       (and identical) even on a Perl built with 32-bit integers.
+     - The same sub defined in two different units on the search path is now
+       rejected (previously it resolved silently by load order).
+     - Array storage is capped in aggregate across all arrays, not only
+       per-array.
+     - The call/sub name check accepts a Multics "segment$entrypoint" form while
+       still excluding path characters.
+
+     Tests: added t/08_review_fixes.t and t/09_review2.t (regressions for every
+     issue in both review passes).
 
 1.0  2026-09-15
      - Initial release.

@@ -69,6 +69,14 @@ sub load_helper_lines {
 sub _index_subs {
     my ($self, $prog) = @_;
     for my $name (keys %{$prog->{subs}}) {
+        if (my $other = $self->{subindex}{$name}) {
+            next if $other == $prog;    # re-indexing the same unit is harmless
+            # the SAME sub name defined in two different units on the search
+            # path is an ambiguity that would otherwise resolve silently by
+            # load order; reject it loudly (errata 070, across units).
+            die "load error: subroutine \"$name\" defined in more than one unit "
+              . "($other->{path} and $prog->{path})\n";
+        }
         $self->{subindex}{$name} = $prog;
     }
 }
@@ -80,12 +88,12 @@ sub _find_and_load_sub {
     return 0 if $self->{_notfound}{$name};   # negative cache: don't re-stat
 
     # SECURITY: the name is about to be interpolated into a filesystem path
-    # ("$dir/$name.basic").  Reject anything that is not a bare identifier, so
-    # a call name cannot contain '/', '.', or '..' to escape the search
-    # directories or open an arbitrary .basic-suffixed file (a path-traversal
-    # read / builtin-hijack primitive).  Faithful, too: a Multics entry name
-    # could not contain '>' or '<'.
-    unless ($name =~ /^[A-Za-z][A-Za-z0-9_]*\z/) {
+    # ("$dir/$name.basic").  Accept only an identifier, optionally with a
+    # Multics "segment$entrypoint" suffix, so a call name cannot contain '/',
+    # '.', '..', '<' or '>' to escape the search directories or open an
+    # arbitrary .basic-suffixed file (a path-traversal read / builtin-hijack
+    # primitive).  ('$' is a safe filename character on Unix.)
+    unless ($name =~ /^[A-Za-z][A-Za-z0-9_]*(?:\$[A-Za-z][A-Za-z0-9_]*)?\z/) {
         $self->{_notfound}{$name} = 1;
         return 0;
     }

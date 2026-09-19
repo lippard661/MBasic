@@ -317,7 +317,7 @@ sub _stmt_call {
     # cannot contain '>' '<' '/' '.' etc.).  Enforcing the shape here rejects
     # path-traversal-style names at compile time (errata 073).
     die "parse error (line $ln): Invalid subroutine name \"$name\"\n"
-        unless $name =~ /^[A-Za-z][A-Za-z0-9_]*\z/;
+        unless $name =~ /^[A-Za-z][A-Za-z0-9_]*(?:\$[A-Za-z][A-Za-z0-9_]*)?\z/;
     my @args;
     if (_is_punct($t,$p,':')) {
         $$p++;
@@ -336,7 +336,7 @@ sub _stmt_sub {
         unless $x && $x->{type} eq 'str';
     my $name=$x->{val}; $$p++;
     die "parse error (line $ln): Invalid subroutine name \"$name\"\n"
-        unless $name =~ /^[A-Za-z][A-Za-z0-9_]*\z/;
+        unless $name =~ /^[A-Za-z][A-Za-z0-9_]*(?:\$[A-Za-z][A-Za-z0-9_]*)?\z/;
     my @params;
     if (_is_punct($t,$p,':')) {
         $$p++;

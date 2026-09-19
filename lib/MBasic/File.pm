@@ -3,6 +3,17 @@ use strict;
 use warnings;
 our $VERSION = '1.1';
 
+use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC);
+use Errno qw(EACCES EPERM EROFS ENOENT);
+
+# O_NOFOLLOW is present on Linux/*BSD/OpenBSD but not universally; fall back to
+# 0 (no-op) where the platform lacks it.
+use constant O_NOFOLLOW_ => do { my $v = eval { Fcntl::O_NOFOLLOW() }; defined $v ? $v : 0 };
+
+# per-process counter so two channels writing the same file don't collide on
+# the temp name within one process.
+my $TMPSEQ = 0;
+
 # ============================================================================
 #  MBasic::File -- one terminal-format file channel (#1..#4).
 #
@@ -143,10 +154,16 @@ sub input_field {
 # lags until close (or an adjust_bit_count/abc call), so an EXTERNAL process
 # reading mid-run sees "zero length" or stale data -- which is exactly why the
 # game uses the "reopen the channel" trick or `abc` before other players read
-# a shared file.  On Unix a file's length follows its bytes immediately, so we
-# flush eagerly here: cross-process reads see writes at once (the behavior the
-# game's abc/trick machinery was straining to achieve on Multics), and `abc`
-# becomes a harmless no-op.  Same-program reads are served from {lines}.
+# a shared file.  On Unix we flush eagerly here so a player who RE-OPENS the
+# shared file sees prior writes at once (the behavior the game's abc/trick
+# machinery was straining to achieve on Multics), and `abc` becomes a harmless
+# no-op.  Same-program reads are served from {lines}.
+#
+# Caveat: the atomic-rename flush (see _flush) replaces the file's inode, so a
+# process holding the OLD file descriptor open keeps reading the old content;
+# visibility requires re-opening by path (which the game always does).  This is
+# the normal trade-off for crash-safe replacement, and per-print flushing means
+# every print #n rewrites the whole (small) file -- fine for the game's use.
 sub print_chunk {
     my ($self, $text, $newline) = @_;
     $self->{wrote} = 1;
@@ -161,42 +178,99 @@ sub print_chunk {
     return;
 }
 
+# serialize the current buffer (committed lines + any unterminated pending
+# line) to an already-open filehandle.  Dies (caught by the caller) on error.
+sub _write_to {
+    my ($self, $fh) = @_;
+    print $fh map { "$_\n" } @{$self->{lines}} or die "$!\n";
+    # a pending (unterminated) partial line is written without a newline
+    if (defined $self->{pending}) { print $fh $self->{pending} or die "$!\n"; }
+    close $fh or die "$!\n";
+    return 1;
+}
+
 # flush buffered content to disk (called on scratch, close, and after writes).
 #
-# Written atomically via a temp file + rename, which (a) never leaves a
-# truncated/half-written file if the process dies or the disk fills mid-write,
-# and (b) replaces a planted SYMLINK at the target with a real file instead of
-# clobbering whatever the link points at.  Write failures raise an authentic
-# BASIC error rather than silently losing data.
+# Strategy 1 -- atomic temp-file + rename (the default).  Crash-safe (a partial
+# or ENOSPC write never truncates the real file), and it replaces a planted
+# symlink AT THE TARGET rather than clobbering the link's destination.  The
+# temp file is created with O_CREAT|O_EXCL|O_NOFOLLOW so a predictable temp name
+# cannot be pre-planted as a symlink to redirect the write.  The original
+# file's permission bits (and, where permitted, its owner/group) are copied
+# onto the replacement so a group-writable shared file stays group-writable.
 #
-# NOTE: this does NOT provide multi-writer locking.  The whole-file rewrite
-# model means concurrent writers can still lose updates; coordinating that is
-# the embedder's responsibility (Explore's helpers use advisory locking around
-# their shared files).  What is fixed here is data-destruction: partial writes,
-# symlink clobbering, and silent write errors.
+# Strategy 2 -- in-place rewrite (fallback).  Creating the temp needs WRITE
+# access to the containing directory.  A common shared-game layout (see
+# Explore's explore_setup.ec) makes the data directory NON-writable to players
+# but pre-creates the data files writable -- the Unix analog of Multics
+# per-segment ACLs, where you can write a segment without modify access to its
+# directory.  When the temp create fails for that reason (EACCES/EPERM/EROFS),
+# we fall back to rewriting the existing file in place, opened O_NOFOLLOW so a
+# planted symlink at the path is still refused.  This loses atomicity for that
+# one case, but it is the only way to honor the intended "writable file in a
+# read-only directory" deployment.
+#
+# NOTE: neither strategy provides multi-writer locking; the whole-file rewrite
+# model means concurrent writers can still lose updates.  Coordinating that is
+# the embedder's responsibility (Explore uses advisory locking around its
+# shared files).  What is fixed here is data-destruction: partial writes,
+# symlink attacks, silent write errors, and permission/owner drift.
 sub _flush {
     my ($self) = @_;
     return unless defined $self->{path};
     my $path = $self->{path};
-    my $tmp  = "$path.mbtmp.$$";
-    open my $fh, '>', $tmp
-        or die "Cannot write into file ($path): $!\n";
-    my $ok = eval {
-        print $fh map { "$_\n" } @{$self->{lines}};
-        # a pending (unterminated) partial line is written without a newline
-        print $fh $self->{pending} if defined $self->{pending};
-        close $fh or die "close: $!\n";
-        1;
-    };
-    unless ($ok) {
-        my $err = $@ || 'write error';
-        close $fh;
+
+    # --- Strategy 1: atomic temp + rename ---
+    my $dir  = ($path =~ m{^(.*)/[^/]+$}) ? $1 : '.';
+    my $fh;
+    my $opened = 0;
+    my $tmp;
+    # Try a few temp names.  O_EXCL means a name already present (a stale temp,
+    # or one an attacker pre-planted -- including as a symlink) makes the create
+    # fail with EEXIST; we simply pick another name rather than following or
+    # clobbering it.  O_NOFOLLOW is belt-and-suspenders on the same point.
+    for my $try (1 .. 8) {
+        $tmp = sprintf('%s/.mbtmp.%d.%d.%d', $dir, $$, ++$TMPSEQ, $try);
+        if (sysopen($fh, $tmp, O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW_, 0600)) { $opened = 1; last; }
+        last unless $!{EEXIST};   # a non-collision error -> stop trying temps
+    }
+    if ($opened) {
+        my $ok = eval { $self->_write_to($fh); 1 };
+        unless ($ok) {
+            my $err = $@ || 'write error';
+            unlink $tmp;
+            die "Cannot write into file ($path): $err\n";
+        }
+        # preserve the target's permissions and (best-effort) ownership so a
+        # shared group-writable file does not become owner-only after a write.
+        if (my @st = stat $path) {
+            chmod $st[2] & 07777, $tmp;
+            chown $st[4], $st[5], $tmp;   # succeeds for root / matching owner; ignored otherwise
+        }
+        if (rename $tmp, $path) { $self->{dirty} = 0; return; }
+        # rename failed: clean up and report (do NOT silently fall through to a
+        # destructive in-place write for an unexpected rename failure).
+        my $err = $!;
         unlink $tmp;
         die "Cannot write into file ($path): $err\n";
     }
-    unless (rename $tmp, $path) {
-        my $err = $!;
-        unlink $tmp;
+
+    # temp create failed.  If it was a directory-permission issue, fall back to
+    # an in-place rewrite; otherwise it's a real error (e.g. ENOSPC) -> report.
+    my $why = $!;
+    unless ($!{EACCES} || $!{EPERM} || $!{EROFS}) {
+        die "Cannot write into file ($path): $why\n";
+    }
+
+    # --- Strategy 2: in-place rewrite (writable file in a read-only dir) ---
+    # The file must already exist and be writable; O_NOFOLLOW refuses a symlink.
+    my $fh2;
+    unless (sysopen($fh2, $path, O_WRONLY|O_TRUNC|O_NOFOLLOW_)) {
+        die "Cannot write into file ($path): $!\n";
+    }
+    my $ok2 = eval { $self->_write_to($fh2); 1 };
+    unless ($ok2) {
+        my $err = $@ || 'write error';
         die "Cannot write into file ($path): $err\n";
     }
     $self->{dirty} = 0;
@@ -205,11 +279,15 @@ sub _flush {
 
 sub close {
     my ($self) = @_;
-    # Only flush channels that were actually written to; a read-only channel
-    # must never rewrite (and thus never touch mtime or risk clobbering) its
-    # file just because it is being closed.  A pending (unterminated) partial
-    # line is flushed as-is by _flush, without forcing a spurious newline.
-    $self->_flush if $self->{wrote};
+    # Flush only if there is unflushed data.  With eager flushing (print_chunk
+    # flushes each write) dirty is already 0 here, so close does NOT perform a
+    # redundant second rewrite; it exists so that a future non-eager mode, or a
+    # sub whose channels are closed on return, still commits.  A read-only
+    # channel (never written) has dirty=0 and is never rewritten, so closing it
+    # cannot touch mtime or clobber its file.  A trailing ';' on the last write
+    # leaves an unterminated final line on disk, as intended for terminal-format
+    # files.
+    $self->_flush if $self->{dirty};
     return;
 }
 

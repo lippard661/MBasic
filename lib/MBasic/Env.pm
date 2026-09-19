@@ -31,6 +31,13 @@ our $VERSION = '1.1';
 # safer for an embedding process and more faithful (Multics would fault).
 our $MAX_ARRAY_CELLS = 5_000_000;
 
+# Aggregate cap across ALL arrays in one environment, so many separately-legal
+# dims cannot together exhaust host memory.
+our $MAX_TOTAL_CELLS = 20_000_000;
+
+# Default RNG seed for a fresh program (repeatable across runs until RANDOMIZE).
+our $RNG_DEFAULT_SEED = 1;
+
 sub new {
     my ($class, %opt) = @_;
     my $self = bless {
@@ -47,32 +54,54 @@ sub new {
         # program's subroutine environments so the whole program draws from one
         # repeatable stream; see MBasic::Executor.  A fresh program starts from
         # a fixed seed (repeatable across runs) unless `randomize` reseeds it.
-        rng     => $opt{rng} || { seed => 1 },
+        rng     => $opt{rng} || { seed => $RNG_DEFAULT_SEED },
     }, $class;
     return $self;
 }
 
-# ---- pseudo-random generator (self-contained; does NOT touch Perl's global
-#      rand()/srand(), so an embedding process's RNG stream is left alone) ----
-# A classic 31-bit linear congruential generator; returns a double in [0,1).
+# ---- pseudo-random generator ----
+# Park-Miller "minimal standard" generator (multiplier 16807, modulus
+# 2^31 - 1) implemented with Schrage's method so that NO intermediate product
+# exceeds 2^31 - 1.  This keeps the arithmetic exact even on a Perl built with
+# 32-bit integers (a plain `seed * 16807` would overflow to a double and lose
+# the low bits that matter), so the "same sequence every run" guarantee holds
+# on every platform.  It is self-contained -- it never calls Perl's global
+# rand()/srand(), so an embedding process's own random stream is untouched.
+use constant {
+    _RNG_A => 16807,
+    _RNG_M => 2147483647,   # 2^31 - 1 (prime)
+    _RNG_Q => 127773,       # M div A
+    _RNG_R => 2836,         # M mod A
+};
+
+# advance the shared seed one step and return it (an integer in 1 .. M-1).
+sub _rng_step {
+    my ($r) = @_;
+    my $seed = $r->{seed};
+    my $hi = int($seed / _RNG_Q);
+    my $lo = $seed % _RNG_Q;
+    my $s  = _RNG_A * $lo - _RNG_R * $hi;   # |s| < M  (Schrage's guarantee)
+    $s += _RNG_M if $s <= 0;
+    return $r->{seed} = $s;
+}
+
+# rnd -> a double in [0,1)
 sub rnd {
     my ($self) = @_;
-    my $r = $self->{rng};
-    $r->{seed} = (($r->{seed} * 1103515245) + 12345) & 0x7fffffff;
-    return $r->{seed} / 0x80000000;
+    return _rng_step($self->{rng}) / _RNG_M;
 }
+
 # `randomize`: reseed from a non-deterministic source so the sequence differs
-# per run (the whole point of the statement).
+# per run (the whole point of the statement), WITHOUT calling Perl's global
+# srand()/rand() (which would disturb an embedding process's stream).  Every
+# term is kept under 2^31 and combined with xor, so this is 32-bit safe too.
 sub randomize_seed {
     my ($self) = @_;
-    # Gather entropy from time + pid + the current state, WITHOUT calling Perl's
-    # global srand()/rand() (which would disturb an embedding process's stream).
     my ($s, $us) = (time, 0);
     if (eval { require Time::HiRes; 1 }) { ($s, $us) = Time::HiRes::gettimeofday(); }
-    $self->{rng}{seed} =
-        ($s ^ ($us * 1000003) ^ ($$ << 15) ^ ($self->{rng}{seed} * 2654435761))
-        & 0x7fffffff;
-    $self->{rng}{seed} ||= 1;   # never a zero seed (LCG would stick at 0)
+    my $mix = ($s & 0x7fffffff) ^ ($us & 0x7fffffff)
+            ^ (($$ & 0x7fff) << 8) ^ ($self->{rng}{seed} & 0x7fffffff);
+    $self->{rng}{seed} = ($mix % (_RNG_M - 1)) + 1;   # -> 1 .. M-1, never 0
     return;
 }
 
@@ -142,6 +171,15 @@ sub declare_array {
     my $size = 1; $size *= ($_+1) for @$bounds;   # 0..bound inclusive
     die "Out of room (dim \"$name\" needs $size cells, limit $MAX_ARRAY_CELLS)\n"
         if $size > $MAX_ARRAY_CELLS;
+    # aggregate cap: many separately-legal dims must not together exhaust memory.
+    # If this name already had an array, its old cells are being replaced.
+    my $old = $store->{$name};
+    my $old_size = $old ? do { my $n = 1; $n *= ($_+1) for @{$old->{dims}}; $n } : 0;
+    my $total = ($self->{total_cells} || 0) - $old_size + $size;
+    die "Out of room (total array storage would reach $total cells, "
+      . "limit $MAX_TOTAL_CELLS)\n"
+        if $total > $MAX_TOTAL_CELLS;
+    $self->{total_cells} = $total;
     my $init = _is_string_name($name) ? '' : 0;
     $store->{$name} = { dims => [ @$bounds ], data => [ ($init) x $size ] };
     return;
