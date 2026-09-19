@@ -243,9 +243,15 @@ sub _flush {
         }
         # preserve the target's permissions and (best-effort) ownership so a
         # shared group-writable file does not become owner-only after a write.
+        # For a NEW file (no existing target) the private 0600 the temp was
+        # created with would lock other players out of a shared directory, so
+        # apply the process umask (0666 & ~umask) as an ordinary create would.
         if (my @st = stat $path) {
             chmod $st[2] & 07777, $tmp;
             chown $st[4], $st[5], $tmp;   # succeeds for root / matching owner; ignored otherwise
+        } else {
+            my $um = umask;
+            chmod( (0666 & ~$um), $tmp ) if defined $um;
         }
         if (rename $tmp, $path) { $self->{dirty} = 0; return; }
         # rename failed: clean up and report (do NOT silently fall through to a

@@ -17,7 +17,7 @@ native helpers and supplies the game data.
 
 INSTALLATION FROM OPENBSD PACKAGE
 
-The p5-MBasic-1.0.tgz file is a Legion of Dynamic Discord-signed
+The p5-MBasic-1.1.tgz file is a Legion of Dynamic Discord-signed
 OpenBSD package which can be installed on OpenBSD with pkg_add and can
 also be installed on macOS or Linux using my install.pl script which
 can be found in this repo:
@@ -90,8 +90,9 @@ last statement")
 
 REQUIREMENTS
 
-Perl 5.8+; core modules only (Fcntl for the file locking used by builtins;
-Test::More and File::Temp for the test suite).
+Perl 5.8+; core modules only (Fcntl and Errno for the atomic, symlink-safe
+file writes, and the file locking used by builtins; Test::More and File::Temp
+for the test suite).
 
 LICENSE
 

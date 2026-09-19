@@ -83,6 +83,9 @@ Revision history for MBasic
        per-array.
      - The call/sub name check accepts a Multics "segment$entrypoint" form while
        still excluding path characters.
+     - A NEWLY created file honors the process umask (0666 & ~umask) instead of
+       the temp file's private 0600, so a file created in a shared directory is
+       not owner-only (which had locked other players out of a multiplayer game).
 
      Tests: added t/08_review_fixes.t and t/09_review2.t (regressions for every
      issue in both review passes).

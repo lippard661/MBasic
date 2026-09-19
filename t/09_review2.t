@@ -53,6 +53,14 @@ sub err {
     run(["10 file #1: \"$p\"", '20 print #1: "new"', '30 end']);
     my $m1 = (stat $p)[2] & 07777;
     is($m1, $m0, 'R2-2 file mode preserved across the atomic write');
+
+    # R3: a NEW file honors the process umask (not the temp's private 0600), so
+    # a shared-game file is not created owner-only, locking other players out.
+    my $um = umask; umask 0002;
+    my $np = "$dir/newshared";
+    run(["10 file #1: \"$np\"", '20 print #1: "hi"', '30 end']);
+    is((stat $np)[2] & 07777, 0664, 'R3 new file created 0664 under umask 0002');
+    umask $um;
 }
 
 # ==== R2-3: writable file in a NON-writable directory (in-place fallback) ====
