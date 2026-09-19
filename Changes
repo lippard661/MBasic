@@ -86,6 +86,11 @@ Revision history for MBasic
      - A NEWLY created file honors the process umask (0666 & ~umask) instead of
        the temp file's private 0600, so a file created in a shared directory is
        not owner-only (which had locked other players out of a multiplayer game).
+     - New MBasic::Interp::load_all_helpers(@dirs): eagerly load, link, and index
+       every helper up front, so a load-time error (a parse rejection, a dangling
+       jump, a sub defined in two units) surfaces at startup instead of the first
+       time a helper is lazily called -- which for an interactive program can be
+       far into a session, where a die would lose the user's work.
 
      Tests: added t/08_review_fixes.t and t/09_review2.t (regressions for every
      issue in both review passes).

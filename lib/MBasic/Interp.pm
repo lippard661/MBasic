@@ -66,6 +66,34 @@ sub load_helper_lines {
     return $prog;
 }
 
+# eagerly load, link, and index every "*.basic" helper in the given directories
+# (or the interpreter's search path when none are given).  This surfaces any
+# load-time error -- a parse rejection, a dangling jump, or the same sub defined
+# in two units -- at STARTUP, instead of the first time a given helper happens
+# to be called (which for an interactive program can be far into a session,
+# where a die would lose the user's work).  Files already loaded (by path) are
+# skipped, so calling this after load_main() will not reload the main program.
+# Returns the number of helper files newly loaded.
+sub load_all_helpers {
+    my ($self, @dirs) = @_;
+    @dirs = @{$self->{search}} unless @dirs;
+    my $count = 0;
+    for my $dir (@dirs) {
+        next unless defined $dir && -d $dir;
+        opendir(my $dh, $dir) or next;
+        my @files = sort grep { /\.basic\z/ } readdir $dh;
+        closedir $dh;
+        for my $f (@files) {
+            my $path = "$dir/$f";
+            next unless -f $path;
+            next if $self->{programs}{$path};   # already loaded (e.g. the main)
+            $self->load_helper_file($path);
+            $count++;
+        }
+    }
+    return $count;
+}
+
 sub _index_subs {
     my ($self, $prog) = @_;
     for my $name (keys %{$prog->{subs}}) {
@@ -167,6 +195,15 @@ Load, link, and index the main program.
 =head2 load_helper_file($path) / load_helper_lines(\@lines, $tag)
 
 Load an additional program unit (defining C<sub>s) from a file or memory.
+
+=head2 load_all_helpers(@dirs)
+
+Eagerly load, link, and index every C<*.basic> helper found in C<@dirs> (or the
+configured search path when called with no arguments), returning the number of
+files newly loaded.  Use it after C<load_main> to validate all helpers up front
+so a load-time error (a parse rejection, a dangling jump, a sub defined in two
+units) is reported at startup rather than the first time that helper is called.
+Files already loaded (by path) are skipped, so the main program is not reloaded.
 
 =head2 resolve_call($name)
 
