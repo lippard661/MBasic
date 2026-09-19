@@ -1,7 +1,7 @@
 package MBasic::File;
 use strict;
 use warnings;
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 
 # ============================================================================
 #  MBasic::File -- one terminal-format file channel (#1..#4).
@@ -55,6 +55,7 @@ sub open_path {
     my $self = $class->new(path => $path);
     if (defined $path && -f $path) {
         open my $fh, '<', $path or do { return $self; };  # unreadable -> empty
+        local $/ = "\n";   # never inherit a caller's alternate record separator
         my @l = <$fh>; close $fh;
         chomp @l;
         $self->{lines} = \@l;
@@ -160,25 +161,55 @@ sub print_chunk {
     return;
 }
 
-# flush buffered content to disk (called on scratch, close, and after writes)
+# flush buffered content to disk (called on scratch, close, and after writes).
+#
+# Written atomically via a temp file + rename, which (a) never leaves a
+# truncated/half-written file if the process dies or the disk fills mid-write,
+# and (b) replaces a planted SYMLINK at the target with a real file instead of
+# clobbering whatever the link points at.  Write failures raise an authentic
+# BASIC error rather than silently losing data.
+#
+# NOTE: this does NOT provide multi-writer locking.  The whole-file rewrite
+# model means concurrent writers can still lose updates; coordinating that is
+# the embedder's responsibility (Explore's helpers use advisory locking around
+# their shared files).  What is fixed here is data-destruction: partial writes,
+# symlink clobbering, and silent write errors.
 sub _flush {
     my ($self) = @_;
     return unless defined $self->{path};
-    open my $fh, '>', $self->{path} or return;
-    print $fh map { "$_\n" } @{$self->{lines}};
-    # a pending (unterminated) partial line is written without a newline
-    print $fh $self->{pending} if defined $self->{pending};
-    close $fh;
+    my $path = $self->{path};
+    my $tmp  = "$path.mbtmp.$$";
+    open my $fh, '>', $tmp
+        or die "Cannot write into file ($path): $!\n";
+    my $ok = eval {
+        print $fh map { "$_\n" } @{$self->{lines}};
+        # a pending (unterminated) partial line is written without a newline
+        print $fh $self->{pending} if defined $self->{pending};
+        close $fh or die "close: $!\n";
+        1;
+    };
+    unless ($ok) {
+        my $err = $@ || 'write error';
+        close $fh;
+        unlink $tmp;
+        die "Cannot write into file ($path): $err\n";
+    }
+    unless (rename $tmp, $path) {
+        my $err = $!;
+        unlink $tmp;
+        die "Cannot write into file ($path): $err\n";
+    }
     $self->{dirty} = 0;
     return;
 }
 
 sub close {
     my ($self) = @_;
-    # commit any pending partial line
-    if (defined $self->{pending}) { push @{$self->{lines}}, $self->{pending};
-                                    $self->{pending} = undef; }
-    $self->_flush if $self->{dirty};
+    # Only flush channels that were actually written to; a read-only channel
+    # must never rewrite (and thus never touch mtime or risk clobbering) its
+    # file just because it is being closed.  A pending (unterminated) partial
+    # line is flushed as-is by _flush, without forcing a spurious newline.
+    $self->_flush if $self->{wrote};
     return;
 }
 

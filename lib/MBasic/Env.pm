@@ -1,7 +1,7 @@
 package MBasic::Env;
 use strict;
 use warnings;
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 
 # ============================================================================
 #  MBasic::Env -- a program unit's runtime variable environment.
@@ -25,6 +25,12 @@ our $VERSION = '1.0';
 #  uninitialized string scalar reads as "" (BASIC default-initialization).
 # ============================================================================
 
+# Cap on the total number of cells a single array may hold.  A BASIC program
+# could otherwise `dim a(100000000)` and drive the host process into an
+# uncatchable Perl "Out of memory!" abort; a loud BASIC-level error is both
+# safer for an embedding process and more faithful (Multics would fault).
+our $MAX_ARRAY_CELLS = 5_000_000;
+
 sub new {
     my ($class, %opt) = @_;
     my $self = bless {
@@ -37,8 +43,37 @@ sub new {
         user    => $opt{user},         # usr$   (defaults computed lazily)
         # date/time are computed live on read (dat$/clk$) unless overridden
         _now    => $opt{now},          # optional fixed epoch for deterministic tests
+        # pseudo-random generator state.  Shared (by reference) with the
+        # program's subroutine environments so the whole program draws from one
+        # repeatable stream; see MBasic::Executor.  A fresh program starts from
+        # a fixed seed (repeatable across runs) unless `randomize` reseeds it.
+        rng     => $opt{rng} || { seed => 1 },
     }, $class;
     return $self;
+}
+
+# ---- pseudo-random generator (self-contained; does NOT touch Perl's global
+#      rand()/srand(), so an embedding process's RNG stream is left alone) ----
+# A classic 31-bit linear congruential generator; returns a double in [0,1).
+sub rnd {
+    my ($self) = @_;
+    my $r = $self->{rng};
+    $r->{seed} = (($r->{seed} * 1103515245) + 12345) & 0x7fffffff;
+    return $r->{seed} / 0x80000000;
+}
+# `randomize`: reseed from a non-deterministic source so the sequence differs
+# per run (the whole point of the statement).
+sub randomize_seed {
+    my ($self) = @_;
+    # Gather entropy from time + pid + the current state, WITHOUT calling Perl's
+    # global srand()/rand() (which would disturb an embedding process's stream).
+    my ($s, $us) = (time, 0);
+    if (eval { require Time::HiRes; 1 }) { ($s, $us) = Time::HiRes::gettimeofday(); }
+    $self->{rng}{seed} =
+        ($s ^ ($us * 1000003) ^ ($$ << 15) ^ ($self->{rng}{seed} * 2654435761))
+        & 0x7fffffff;
+    $self->{rng}{seed} ||= 1;   # never a zero seed (LCG would stick at 0)
+    return;
 }
 
 # ---- helpers to classify a name ----
@@ -101,7 +136,12 @@ sub set_scalar {
 sub declare_array {
     my ($self, $name, $bounds) = @_;
     my $store = _is_string_name($name) ? $self->{sarray} : $self->{narray};
+    for my $b (@$bounds) {
+        die "Subscript out of bounds (dim \"$name\": negative bound)\n" if $b < 0;
+    }
     my $size = 1; $size *= ($_+1) for @$bounds;   # 0..bound inclusive
+    die "Out of room (dim \"$name\" needs $size cells, limit $MAX_ARRAY_CELLS)\n"
+        if $size > $MAX_ARRAY_CELLS;
     my $init = _is_string_name($name) ? '' : 0;
     $store->{$name} = { dims => [ @$bounds ], data => [ ($init) x $size ] };
     return;

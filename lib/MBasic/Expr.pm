@@ -1,7 +1,19 @@
 package MBasic::Expr;
 use strict;
 use warnings;
-our $VERSION = '1.0';
+our $VERSION = '1.1';
+
+# The source line number of the statement currently being evaluated.  The
+# executor sets this before each statement so that run-time errors raised deep
+# in expression evaluation can name the BASIC line (not an interpreter file /
+# line) in their authentic Multics message.
+our $LINE;
+
+# raise a run-time error with the authentic message text plus the BASIC line.
+sub _rt {
+    my ($msg) = @_;
+    die "$msg" . (defined $LINE ? " (line $LINE)" : "") . "\n";
+}
 
 # ============================================================================
 #  MBasic::Expr -- parse and evaluate Multics BASIC (Explore subset)
@@ -221,10 +233,19 @@ sub eval {
         return $a - $b if $op eq '-';
         return $a * $b if $op eq '*';
         if ($op eq '/') {
-            die "Division by zero\n" if $b == 0;
+            _rt("Division by zero") if $b == 0;
             return $a / $b;
         }
-        return $a ** $b if $op eq '^';
+        if ($op eq '^') {
+            # Multics reports these as run-time errors rather than returning
+            # Inf/NaN the way Perl's ** does (errata 095/096/121).
+            if ($a == 0) {
+                _rt("Zero power of zero")     if $b == 0;
+                _rt("Negative power of zero")  if $b < 0;
+            }
+            _rt("Power of negative number") if $a < 0 && $b != int($b);
+            return $a ** $b;
+        }
         die "internal: unknown binop $op\n";
     }
     if ($k eq 'rel') {
@@ -304,9 +325,11 @@ sub _call_builtin {
     if ($name eq 'int')   { return _floor($a[0]); }     # largest int <= x
     if ($name eq 'abs')   { return abs($a[0]); }
     if ($name eq 'sgn')   { return $a[0] <=> 0; }
-    if ($name eq 'sqr')   { return sqrt($a[0]); }
+    if ($name eq 'sqr')   { _rt("Square root of negative number") if $a[0] < 0;
+                            return sqrt($a[0]); }
     if ($name eq 'chr$')  { return chr(int($a[0]) % 128); }
-    if ($name eq 'asc')   { return ord(substr($a[0],0,1)); }
+    if ($name eq 'asc')   { _rt('Invalid "ASC" function arg') if length($a[0]) == 0;
+                            return ord(substr($a[0],0,1)); }
     if ($name eq 'tst')   { return _looks_numeric($a[0]) ? 1 : 0; }
     if ($name eq 'pos')   {   # 1-based location of b$ in a$ at/after i; 0 if none
         my ($s,$sub,$i) = @a;
@@ -314,7 +337,7 @@ sub _call_builtin {
         my $p = index($s, $sub, $i-1);
         return $p < 0 ? 0 : $p + 1;
     }
-    if ($name eq 'rnd')   { return rand(); }            # RNG seeding handled by executor
+    if ($name eq 'rnd')   { return $env->rnd; }         # per-program repeatable RNG
     if ($name eq 'cnt')   { return $env->arg_count; }
     if ($name eq 'arg$')  { return $env->arg_at(int($a[0])); }
 
@@ -350,10 +373,26 @@ sub _num_to_str {
     if ($mag == int($mag) && $mag < 134_217_728) {
         $body = sprintf('%d', $mag);
     } else {
-        # fractional: up to 6 significant digits, trim trailing zeros
-        $body = sprintf('%.6g', $mag);
+        # fractional / large: up to 6 significant digits, Multics-style.
+        $body = _g6($mag);
     }
     return $sign . $body;      # leading sign-blank, NO trailing blank
+}
+
+# Format a non-negative magnitude to 6 significant digits in Multics BASIC
+# style: a plain decimal (trailing zeros trimmed) when it fits, otherwise
+# scientific notation with an UPPERCASE 'E', an explicit exponent sign, and a
+# two-digit exponent (e.g. "2E+08") -- NOT Perl/C's lowercase "2e+08".
+sub _g6 {
+    my ($mag) = @_;
+    my $body = sprintf('%.6g', $mag);
+    if ($body =~ /^([0-9.]+)[eE]([+-]?)(\d+)$/) {
+        my ($m, $sgn, $exp) = ($1, $2, $3);
+        $sgn = '+' unless length $sgn;
+        $exp = sprintf('%02d', $exp);
+        $body = "${m}E${sgn}${exp}";
+    }
+    return $body;
 }
 
 1;

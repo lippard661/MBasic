@@ -1,11 +1,24 @@
 package MBasic::Executor;
 use strict;
 use warnings;
-our $VERSION = '1.0';
+# BASIC subroutine calls recurse through the Perl call stack; recursion is
+# bounded explicitly by $MAX_CALL_DEPTH below, so Perl's cosmetic
+# "Deep recursion" warning (which fires at 100 frames) is not wanted.
+no warnings 'recursion';
+our $VERSION = '1.1';
 use MBasic::Expr;
 use MBasic::Env;
 use MBasic::Arg;
 use MBasic::File;
+
+# Largest column a print `tab(e)` will space out to.  A BASIC program could
+# otherwise `tab(1e9)` and drive the host into an out-of-memory abort building
+# the pad string; past this we raise a loud BASIC error instead.
+our $MAX_TAB = 100_000;
+
+# Maximum nesting depth of BASIC `call`s, to bound host stack/recursion (a
+# program with unbounded mutual recursion would otherwise abort the process).
+our $MAX_CALL_DEPTH = 500;
 
 # ============================================================================
 #  MBasic::Executor -- the PC-driven run loop over a Program's IR, against a
@@ -18,6 +31,9 @@ use MBasic::File;
 #  wired to hooks that the interpreter fills in (registry + File model) in the
 #  next increments; here they die "not yet wired" if exercised.
 # ============================================================================
+
+# raise a run-time error with an authentic message plus the BASIC line number.
+sub _rt_line { my ($msg, $ln) = @_; die "$msg" . (defined $ln ? " (line $ln)" : "") . "\n"; }
 
 # A RunState is the per-program-unit execution context.
 sub new_runstate {
@@ -36,6 +52,8 @@ sub new_runstate {
         interp   => $opt{interp}, # back-ref for call dispatch (later)
         pathxlate=> $opt{pathxlate},
         halt     => 0,
+        stopall  => 0,            # set by stop/end: terminate the WHOLE program
+        depth    => $opt{depth} // 0,   # BASIC call-nesting depth
         col      => 0,            # current print column (for tab/comma zones)
     };
 }
@@ -44,6 +62,16 @@ sub new_runstate {
 sub run_program {
     my ($class, $prog, %opt) = @_;
     my $rs = $class->new_runstate(program => $prog, %opt);
+    # Convert Perl's numeric-coercion warnings (which name interpreter internals
+    # and would otherwise leak to stderr while the statement silently proceeds
+    # with a wrong value) into an authentic BASIC error at the current line.
+    local $SIG{__WARN__} = sub {
+        my $w = shift;
+        if ($w =~ /isn't numeric/) {
+            _rt_line("Mixed string and numeric expression", $MBasic::Expr::LINE);
+        }
+        CORE::warn($w);
+    };
     $class->run_loop($rs);
     return $rs;
 }
@@ -69,9 +97,16 @@ sub exec_stmt {
     my $op = $s->{op};
     my $env = $rs->{env};
 
+    # make the current BASIC line available to run-time errors raised inside
+    # expression evaluation (see MBasic::Expr::_rt).
+    local $MBasic::Expr::LINE = $s->{line};
+
     if ($op eq 'rem' || $op eq 'data' || $op eq 'sub') { return 0; }  # no-ops here
-    if ($op eq 'randomize') { srand(); return 0; }
-    if ($op eq 'stop' || $op eq 'end' || $op eq 'subend') { $rs->{halt}=1; return 1; }
+    if ($op eq 'randomize') { $env->randomize_seed; return 0; }
+    # `stop` and `end` terminate the WHOLE program (stopall bubbles up through
+    # any enclosing subroutine calls); `subend` only ends the current sub.
+    if ($op eq 'stop' || $op eq 'end') { $rs->{halt}=1; $rs->{stopall}=1; return 1; }
+    if ($op eq 'subend') { $rs->{halt}=1; return 1; }
 
     if ($op eq 'let') {
         my $v = MBasic::Expr->eval($s->{expr}, $env);
@@ -126,15 +161,16 @@ sub exec_stmt {
         my $to   = MBasic::Expr->eval($s->{to}, $env);
         my $step = defined $s->{step} ? MBasic::Expr->eval($s->{step}, $env) : 1;
         $env->set_scalar($s->{var}, $from);
-        # push a frame; the loop body runs starting at pc+1
-        push @{$rs->{forstk}}, { var=>$s->{var}, limit=>$to, step=>$step,
-                                 top=>$rs->{pc}+1 };
-        # if the initial value already exceeds the limit, skip the loop:
+        # zero-trip loop: if the initial value already passes the limit, skip
+        # the body WITHOUT pushing a frame (otherwise the stale frame would sit
+        # on the stack and break the enclosing loop's `next`).
         if (($step >= 0 && $from > $to) || ($step < 0 && $from < $to)) {
-            # find matching next and jump past it
             $class->_skip_to_after_next($rs, $s->{var});
             return 1;
         }
+        # otherwise push a frame; the loop body runs starting at pc+1
+        push @{$rs->{forstk}}, { var=>$s->{var}, limit=>$to, step=>$step,
+                                 top=>$rs->{pc}+1 };
         return 0;
     }
     if ($op eq 'next') {
@@ -224,6 +260,7 @@ sub _do_print {
         $printed_trailing_sep = 0;
         if ($it->{kind} eq 'tab') {
             my $target = int(MBasic::Expr->eval($it->{node}, $env));
+            _rt_line("Invalid margin", $s->{line}) if $target > $MAX_TAB;
             if ($target > $rs->{col}) { $emit->(' ' x ($target - $rs->{col})); }
             next;
         }
@@ -249,7 +286,9 @@ sub _do_print_file {
             next;
         }
         $trailing_sep = 0;
-        if ($it->{kind} eq q{tab}) { my $t=int(MBasic::Expr->eval($it->{node},$env)); $line .= q{ } x ($t-length($line)) if $t>length($line); next; }
+        if ($it->{kind} eq q{tab}) { my $t=int(MBasic::Expr->eval($it->{node},$env));
+            _rt_line("Invalid margin", $s->{line}) if $t > $MAX_TAB;
+            $line .= q{ } x ($t-length($line)) if $t>length($line); next; }
         my $node = $it->{node};
         my $v = MBasic::Expr->eval($node, $env);
         $line .= MBasic::Expr::_is_string_expr($node) ? $v : _print_number($v);
@@ -264,7 +303,7 @@ sub _print_number {
     my $sign = $x < 0 ? '-' : ' ';
     my $mag = abs($x);
     my $body = ($mag == int($mag) && $mag < 134_217_728)
-             ? sprintf('%d', $mag) : sprintf('%.6g', $mag);
+             ? sprintf('%d', $mag) : MBasic::Expr::_g6($mag);
     return $sign . $body . ' ';
 }
 
@@ -299,7 +338,8 @@ sub _do_call {
     # kind eq 'sub': run a BASIC subroutine as its own program unit
     my ($subprog, $entryinfo) = @info;
     $class->_call_basic_sub($rs, $subprog, $entryinfo, \@args, $s->{line});
-    return 0;
+    # a `stop`/`end` reached inside the sub terminates the whole program.
+    return $rs->{halt} ? 1 : 0;
 }
 
 # build an Arg adapter from a call-argument expr-node.
@@ -328,13 +368,23 @@ sub _call_basic_sub {
     die "Subroutine called with wrong number of parameters (line $callline)\n"
         if @$args != @$params;
 
+    # bound recursion depth so runaway/mutual recursion raises a loud BASIC
+    # error instead of aborting the host process with a stack overflow.
+    my $depth = $caller_rs->{depth} + 1;
+    die "Stack space exhausted, subroutine/function calls beyond maximum depth"
+      . " (line $callline)\n"
+        if $depth > $MAX_CALL_DEPTH;
+
     # fresh environment for the sub, sharing the run context (argv/user) but
     # its OWN variables/arrays/data-pointer/files.  The sub's dat$/clk$/usr$
-    # specials come from the same run context.
+    # specials come from the same run context, and it draws from the SAME
+    # pseudo-random stream (shared by reference) so the program's RNG sequence
+    # is one repeatable stream across all its units.
     my $sub_env = MBasic::Env->new(
         argv => $caller_rs->{env}{argv},
         user => $caller_rs->{env}{user},
         now  => $caller_rs->{env}{_now},
+        rng  => $caller_rs->{env}{rng},
     );
 
     # bind parameters: copy the argument's current value INTO the sub's param
@@ -354,6 +404,7 @@ sub _call_basic_sub {
         out     => $caller_rs->{out},
         input   => $caller_rs->{input},
         pathxlate => $caller_rs->{pathxlate},
+        depth   => $depth,
     );
     $sub_rs->{pc} = $entryinfo->{entry} + 1;   # start after the `sub` statement
     # run until subend (halt) or fall-through
@@ -366,6 +417,16 @@ sub _call_basic_sub {
             $sub_rs->{pc}++ unless $jumped;
         }
     }
+
+    # commit/close the sub's own file channels (the sub has its own {files};
+    # without this a sub's writes would rely solely on eager flushing).
+    for my $chan (keys %{$sub_rs->{files}}) {
+        $sub_rs->{files}{$chan}->close if $sub_rs->{files}{$chan};
+    }
+
+    # a `stop`/`end` inside the sub terminates the whole program: bubble it up
+    # to the caller so the caller's run loop halts too.
+    if ($sub_rs->{stopall}) { $caller_rs->{halt} = 1; $caller_rs->{stopall} = 1; }
 
     # copy back: write each parameter's final value out to the caller's arg
     # adapter (write-back).  Per Appendix B, strings are written back; we write
@@ -384,6 +445,7 @@ sub _do_file_op {
 
     if ($op eq 'file') {
         my $chan = int(MBasic::Expr->eval($s->{chan}, $env));
+        _rt_line("Invalid file number", $s->{line}) if $chan < 1 || $chan > 4;
         my $path = MBasic::Expr->eval($s->{path}, $env);
         # apply the optional path-translation hook (the Explore layer maps
         # Multics '>a>b' pathnames to Unix paths; the generic core stays
@@ -454,13 +516,24 @@ sub _do_terminal_input {
         $class->_assign($rs, $s->{var}, $line);
         return 0;
     }
-    # input: print the prompt, read a line, split on commas
+    # input: print the prompt, read a line, split on commas.  If the line
+    # supplies fewer values than there are variables, Multics prints "Not
+    # enough input, add more" and reads more (errata 107) rather than silently
+    # defaulting the missing variables to 0/"".
+    my $nvars = scalar @{$s->{vars}};
     $rs->{out}->("? ");
     my $line = $getline->();
-    $line = '' unless defined $line;
-    chomp $line if defined $line;
+    _rt_line("Not enough input, add more", $s->{line}) unless defined $line;
+    chomp $line;
     my @fields = split /,/, $line, -1;
-    for my $i (0 .. $#{$s->{vars}}) {
+    while (@fields < $nvars) {
+        $rs->{out}->("Not enough input, add more\n? ");
+        my $more = $getline->();
+        _rt_line("Not enough input, add more", $s->{line}) unless defined $more;
+        chomp $more;
+        push @fields, split /,/, $more, -1;
+    }
+    for my $i (0 .. $nvars-1) {
         my $lv = $s->{vars}[$i];
         my $raw = defined $fields[$i] ? $fields[$i] : '';
         $raw =~ s/^\s+//; $raw =~ s/\s+$//;

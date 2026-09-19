@@ -1,7 +1,7 @@
 package MBasic::Lexer;
 use strict;
 use warnings;
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 
 # ============================================================================
 #  MBasic::Lexer -- tokenize one source line of Multics BASIC (the Explore
@@ -44,7 +44,7 @@ sub tokenize_line {
 
     # ---- line number (required, leading) ----
     $text =~ s/^\s+//;
-    unless ($text =~ s/^(\d+)\s?//) {
+    unless ($text =~ s/^(\d+)\s*//) {
         die "lex error: line does not begin with a line number: <<$orig>>\n";
     }
     my $lineno = $1 + 0;

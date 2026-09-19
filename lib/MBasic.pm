@@ -2,7 +2,7 @@ package MBasic;
 use strict;
 use warnings;
 
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 
 1;
 
@@ -143,9 +143,15 @@ adapters that write back to the caller's variables for out-parameters; or
 
 a B<BASIC subroutine> (a C<sub "name"> in a loaded C<.basic> file), which is
 run as its own program unit in a B<fresh environment> -- its own variables,
-file channels, C<data> pointer and pseudo-random generator, all reset on entry
--- with parameters bound by reference.  Only the parameters connect a
-subroutine to its caller.
+file channels and C<data> pointer, all reset on entry -- with parameters bound
+by reference.  Only the parameters connect a subroutine to its caller.  The
+pseudo-random generator is the one exception to the fresh environment: it is a
+single stream shared across the whole program (main and all its subroutines),
+so the random sequence is continuous and repeatable regardless of where C<rnd>
+is called.  It is self-contained (it does not use Perl's global C<rand>/C<srand>,
+so an embedding process's own random stream is left undisturbed), starts from a
+fixed seed for a repeatable sequence across runs, and is reseeded from an
+entropy source only by the C<randomize> statement.
 
 =back
 
@@ -191,9 +197,54 @@ range" -- so that a failure reads as it would on Multics.  Constructs outside
 the implemented subset produce "Unimplemented run-time operator" (or a parse-
 time rejection), matching the manual's treatment of unimplemented operations.
 
+=head1 SECURITY
+
+MBasic runs an interpreted language, and a program can open files, read C<data>,
+and (via C<file>/C<print #n>) write files.  When the BASIC program and its
+helper files are trusted (as with the Explore game), this is unremarkable.  When
+a program or its input might be B<untrusted>, note the following boundaries:
+
+=over 4
+
+=item *
+
+B<File pathnames are the containment boundary.>  A C<file #n: path> statement
+opens whatever path the program computes.  The interpreter does not itself
+sandbox pathnames; an embedder that needs containment supplies a C<pathxlate>
+hook (passed to C<run>) that maps every BASIC pathname into an allowed subtree
+before it is opened.  The companion L<Explore::Builtins> C<mult_path> is a
+worked example (it maps Multics C<< >a>b >> names under a fixed root).  Without
+such a hook, a program can name any path the host process can access; install a
+C<pathxlate> that rejects absolute paths and C<..> when running untrusted input.
+
+=item *
+
+B<Writes are atomic and symlink-safe but not locked.>  Each file write is
+committed via a temp file plus C<rename>, so a crash or full disk never leaves a
+truncated file, and a planted symlink at the target is replaced rather than
+followed.  There is no multi-writer locking, however: the whole-file-rewrite
+model means concurrent writers can still lose updates.  Coordinating concurrent
+writers is the embedder's responsibility (Explore uses advisory locking around
+its shared files).
+
+=item *
+
+B<Resource use is bounded, not eliminated.>  Array size, C<print tab()> width,
+and C<call> recursion depth are capped so a program raises a loud BASIC error
+rather than aborting the host with an out-of-memory or stack fault; but a
+program can still consume CPU and memory up to those caps.
+
+=item *
+
+B<call names are validated.>  A C<call> target must be a bare identifier, so a
+call name cannot be used to traverse the filesystem or load an arbitrary
+C<.basic>-suffixed file from the search path.
+
+=back
+
 =head1 VERSION
 
-Version 1.0.
+Version 1.1.
 
 =head1 AUTHOR
 

@@ -1,7 +1,7 @@
 package MBasic::Arg;
 use strict;
 use warnings;
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 
 # ============================================================================
 #  MBasic::Arg -- an argument adapter passed to a native builtin (and used for

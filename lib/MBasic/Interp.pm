@@ -1,7 +1,7 @@
 package MBasic::Interp;
 use strict;
 use warnings;
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 use MBasic::Program;
 use MBasic::Linker;
 use MBasic::Registry;
@@ -77,11 +77,25 @@ sub _index_subs {
 sub _find_and_load_sub {
     my ($self, $name) = @_;
     return 1 if $self->{subindex}{$name};
+    return 0 if $self->{_notfound}{$name};   # negative cache: don't re-stat
+
+    # SECURITY: the name is about to be interpolated into a filesystem path
+    # ("$dir/$name.basic").  Reject anything that is not a bare identifier, so
+    # a call name cannot contain '/', '.', or '..' to escape the search
+    # directories or open an arbitrary .basic-suffixed file (a path-traversal
+    # read / builtin-hijack primitive).  Faithful, too: a Multics entry name
+    # could not contain '>' or '<'.
+    unless ($name =~ /^[A-Za-z][A-Za-z0-9_]*\z/) {
+        $self->{_notfound}{$name} = 1;
+        return 0;
+    }
+
     for my $dir (@{$self->{search}}) {
         my $cand = "$dir/$name.basic";
         if (-f $cand) { $self->load_helper_file($cand);
                         return 1 if $self->{subindex}{$name}; }
     }
+    $self->{_notfound}{$name} = 1;
     return 0;
 }
 

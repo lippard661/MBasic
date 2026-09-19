@@ -1,7 +1,7 @@
 package MBasic::Program;
 use strict;
 use warnings;
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 use MBasic::Parser;
 
 # ============================================================================
@@ -31,6 +31,7 @@ sub new {
 sub load_file {
     my ($class, $path) = @_;
     open my $fh, '<', $path or die "cannot open $path: $!\n";
+    local $/ = "\n";   # never inherit a caller's alternate record separator
     my @lines = <$fh>; close $fh;
     return $class->load_lines(\@lines, $path);
 }
@@ -39,7 +40,8 @@ sub load_lines {
     my ($class, $lines, $path) = @_;
     my $self = $class->new(path => $path);
     my $prev = -1;
-    for my $raw (@$lines) {
+    for my $line (@$lines) {
+        my $raw = $line;    # copy: never chomp the caller's array in place
         chomp $raw;
         next if $raw =~ /^\s*$/;
         my ($lineno, $rec) = MBasic::Parser->parse_line($raw);
@@ -50,8 +52,12 @@ sub load_lines {
         my $idx = scalar @{$self->{ir}};
         push @{$self->{ir}}, $rec;
         $self->{linemap}{$lineno} = $idx;
-        # index sub entry points
+        # index sub entry points (a duplicate definition is an error, errata
+        # 070, rather than silently letting the last one win)
         if ($rec->{op} eq 'sub') {
+            die "load error ($path): Subroutine \"$rec->{name}\" defined more "
+              . "than once (line $lineno)\n"
+                if exists $self->{subs}{ $rec->{name} };
             $self->{subs}{ $rec->{name} } = { entry => $idx, params => $rec->{params} };
         }
         # collect DATA values into this unit's pool, in source order

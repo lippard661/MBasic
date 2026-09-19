@@ -1,5 +1,64 @@
 Revision history for MBasic
 
+1.1  2026-09-19
+     Correctness and fidelity fixes from an external code review (Claude
+     Opus 5.0.
+
+     Correctness:
+     - A zero-trip inner FOR (limit below start at run time) no longer leaks
+       its loop frame, which had corrupted the enclosing loop's NEXT.
+     - STOP and END now terminate the whole program even when reached inside a
+       called BASIC subroutine (previously they ended only the subroutine).
+     - An indented REM (line number followed by more than one space) is now
+       tokenized as a comment instead of failing to lex.
+     - Trailing tokens after a complete statement are now rejected ("extra
+       tokens after statement") instead of being silently ignored, so a
+       construct outside the subset (e.g. IF ... THEN ... ELSE) is refused
+       rather than mis-run.
+     - The RNG is now a self-contained, per-program stream: repeatable across
+       runs by default, reseeded only by RANDOMIZE, and no longer using or
+       disturbing Perl's global rand()/srand().  Shared across a program and
+       its subroutines (the MBasic.pm doc was corrected to match).
+     - Terminal INPUT with fewer values than variables now reports "Not enough
+       input, add more" and re-prompts, instead of silently defaulting.
+     - Math domain errors surface as authentic Multics messages with the BASIC
+       line number ("Square root of negative number", "Negative power of
+       zero", "Zero power of zero", "Power of negative number") instead of raw
+       Perl errors or silent Inf/NaN.
+     - Numeric/string type mismatches now raise "Mixed string and numeric
+       expression" at the BASIC line instead of leaking a Perl warning (naming
+       an interpreter file/line) and proceeding with a wrong value.
+
+     Robustness / security (matters when MBasic is embedded on untrusted input):
+     - A CALL name is validated as a bare identifier, closing a path-traversal
+       vector (a name like "../secret/x" could open and echo arbitrary
+       .basic-suffixed files and hijack later builtin calls).
+     - File writes are atomic (temp file + rename) and no longer follow a
+       planted symlink at the target; write failures raise "Cannot write into
+       file" instead of silently losing data.
+     - Array size, print TAB() width, and CALL recursion depth are capped so a
+       program raises a loud BASIC error ("Out of room", "Invalid margin",
+       "Stack space exhausted, ...") rather than aborting the host process with
+       an out-of-memory or stack fault.
+     - File reads localize $/ so an embedder's record separator cannot break
+       them; Program::load_lines no longer mutates the caller's array.
+     - A new SECURITY section in MBasic documents the pathxlate containment
+       boundary and the trust model.
+
+     Fidelity:
+     - close #n reliably flushes the final buffered write; a called sub's file
+       channels are now closed on return.
+     - A $-suffixed FOR loop variable is rejected ("Numeric variable
+       required"); asc("") errors ('Invalid "ASC" function arg'); str$ uses
+       Multics uppercase-E scientific format (e.g. "2E+08", not "2e+08").
+     - File channel numbers are restricted to 1..4 ("Invalid file number").
+     - A subroutine defined more than once in one unit is rejected
+       ("Subroutine ... defined more than once") instead of silently letting
+       the last definition win.
+     - resolve_call negatively caches unresolved names (no re-stat per call).
+
+     Tests: added t/08_review_fixes.t (regressions for every issue above).
+
 1.0  2026-09-15
      - Initial release.
      - A dependency-free interpreter for the subset of Multics BASIC used by

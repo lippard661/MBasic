@@ -1,7 +1,7 @@
 package MBasic::Parser;
 use strict;
 use warnings;
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 use MBasic::Lexer;
 use MBasic::Expr;
 
@@ -66,6 +66,14 @@ sub _eat_punct {
 sub _is_punct { my ($t,$p,$v)=@_; my $x=$t->[$$p]; $x && $x->{type} eq 'punct' && $x->{val} eq $v; }
 sub _at_end   { my ($t,$p)=@_; $$p >= scalar(@$t); }
 
+# Explicit keyword -> handler dispatch table.  Built from the statement
+# grammar, NOT from method names via ->can, so no future helper method named
+# _stmt_* can silently become a reachable statement keyword.
+my %DISPATCH = map { $_ => "_stmt_$_" } qw(
+    rem let print goto gosub return stop end randomize subend
+    if on for next input linput file scratch reset dim call sub data read
+);
+
 sub _parse_tokens {
     my ($class, $ln, $toks) = @_;
     my $p = 0;
@@ -73,14 +81,20 @@ sub _parse_tokens {
     die "parse error (line $ln): statement does not begin with a keyword\n"
         unless defined $kw;
 
-    # dispatch on the statement keyword
-    my $m = "_stmt_$kw";
-    # 'if end' / 'if more' handled inside _stmt_if
-    if ($class->can($m)) {
-        $p = 1;   # consume the keyword; each handler starts after it
-        return $class->$m($ln, $toks, \$p);
-    }
-    die "parse error (line $ln): unknown/unimplemented statement '$kw'\n";
+    # dispatch on the statement keyword ('if end'/'if more' handled in _stmt_if)
+    my $m = $DISPATCH{$kw}
+        or die "parse error (line $ln): unknown/unimplemented statement '$kw'\n";
+    $p = 1;   # consume the keyword; each handler starts after it
+    my $rec = $class->$m($ln, $toks, \$p);
+
+    # fail loudly on tokens the statement did not consume, so a construct
+    # outside the implemented subset (e.g. a dropped `else`, or trailing
+    # garbage) is rejected rather than silently mis-run.  `rem` keeps its
+    # free-text remainder token by design, so it is exempt.
+    die "parse error (line $ln): extra tokens after statement\n"
+        unless $rec->{op} eq 'rem' || _at_end($toks, \$p);
+
+    return $rec;
 }
 
 # ---- lvalue: name  or  name(subs) ----
@@ -208,6 +222,10 @@ sub _stmt_for {
     my $x=$t->[$$p]; die "parse error (line $ln): for needs a variable\n"
         unless $x && $x->{type} eq 'ident';
     my $var=$x->{val}; $$p++;
+    # a for loop control variable must be numeric (errata 042); a $-suffixed
+    # (string) loop variable is rejected.
+    die "parse error (line $ln): Numeric variable required (for)\n"
+        if substr($var, -1) eq '$';
     my $eq=$t->[$$p]; die "parse error (line $ln): for missing '='\n"
         unless $eq && $eq->{type} eq 'op' && $eq->{val} eq '=';
     $$p++;
@@ -295,6 +313,11 @@ sub _stmt_call {
     die "parse error (line $ln): call needs a quoted name\n"
         unless $x && $x->{type} eq 'str';
     my $name=$x->{val}; $$p++;
+    # A subroutine/procedure name must be a valid identifier (Multics names
+    # cannot contain '>' '<' '/' '.' etc.).  Enforcing the shape here rejects
+    # path-traversal-style names at compile time (errata 073).
+    die "parse error (line $ln): Invalid subroutine name \"$name\"\n"
+        unless $name =~ /^[A-Za-z][A-Za-z0-9_]*\z/;
     my @args;
     if (_is_punct($t,$p,':')) {
         $$p++;
@@ -312,6 +335,8 @@ sub _stmt_sub {
     die "parse error (line $ln): sub needs a quoted name\n"
         unless $x && $x->{type} eq 'str';
     my $name=$x->{val}; $$p++;
+    die "parse error (line $ln): Invalid subroutine name \"$name\"\n"
+        unless $name =~ /^[A-Za-z][A-Za-z0-9_]*\z/;
     my @params;
     if (_is_punct($t,$p,':')) {
         $$p++;
