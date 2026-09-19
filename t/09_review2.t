@@ -158,4 +158,23 @@ like(err(['10 print a$ + 0', '20 end']),
 like(err(['10 call "../secret/x": a', '20 end']),
      qr/Invalid subroutine name/, 'name regex: traversal name still rejected');
 
+# ==== R4: `next` closes inner loops abandoned by a jump out of them ====
+# (Multics runtime behavior; the strict top-of-stack check faulted legal
+# programs such as Explore's abbrev expander, which jumps out of an inner FOR.)
+{
+    # jump out of the inner j loop, then hit the outer `next i`
+    is(run(['10 for i=1 to 3','20 for j=1 to 5','30 if j=1 then 50',
+            '40 next j','50 next i','60 print i','70 end']),
+       " 4 \n", 'R4 outer next closes an abandoned inner loop and keeps iterating');
+    # normal nested loops are unaffected
+    is(run(['10 for i=1 to 2','20 for j=1 to 2','30 print i;j;',
+            '40 next j','50 next i','60 end']),
+       " 1  1  1  2  2  1  2  2 ", 'R4 normal nested for/next still correct');
+    # a next for a variable with no open loop is still an error
+    like(err(['10 for i=1 to 2','20 next k','30 end']),
+         qr/^For-next mismatch/, 'R4 next of an unopened variable still errors');
+    like(err(['10 next i','20 end']),
+         qr/^Next without for/, 'R4 next with no loop at all still errors');
+}
+
 done_testing;

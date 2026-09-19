@@ -206,17 +206,29 @@ sub exec_stmt {
         return 0;
     }
     if ($op eq 'next') {
-        my $fr = $rs->{forstk}[-1];
-        die "Next without for (line $s->{line})\n" unless $fr;
-        die "For-next mismatch (line $s->{line})\n"
-            if $fr->{var} ne $s->{var};
+        my $stk = $rs->{forstk};
+        die "Next without for (line $s->{line})\n" unless @$stk;
+        # Find the nearest frame for this variable.  A jump OUT of an inner
+        # for-loop (goto / if-then-line) leaves that inner frame on the stack;
+        # when control later reaches an ENCLOSING loop's `next`, Multics BASIC
+        # closes those abandoned inner loops rather than faulting.  (The
+        # compile-time "For-next mismatch", errata 044, checks static nesting;
+        # at run time an outer `next` discards still-open inner frames.)  So we
+        # search down for the matching variable and drop any frames above it.
+        my $idx = -1;
+        for (my $k = $#$stk; $k >= 0; $k--) {
+            if ($stk->[$k]{var} eq $s->{var}) { $idx = $k; last; }
+        }
+        die "For-next mismatch (line $s->{line})\n" if $idx < 0;
+        splice(@$stk, $idx + 1) if $idx < $#$stk;   # discard abandoned inner loops
+        my $fr = $stk->[-1];
         my $cur = $env->get_scalar($fr->{var}) + $fr->{step};
         $env->set_scalar($fr->{var}, $cur);
         if (($fr->{step} >= 0 && $cur <= $fr->{limit})
          || ($fr->{step} <  0 && $cur >= $fr->{limit})) {
             $rs->{pc} = $fr->{top}; return 1;      # loop again
         }
-        pop @{$rs->{forstk}};                       # done
+        pop @$stk;                                  # this loop done
         return 0;
     }
 

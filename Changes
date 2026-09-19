@@ -7,6 +7,14 @@ Revision history for MBasic
      Correctness:
      - A zero-trip inner FOR (limit below start at run time) no longer leaks
        its loop frame, which had corrupted the enclosing loop's NEXT.
+     - NEXT now closes inner FOR loops abandoned by a jump out of them: when a
+       goto/if-then-line leaves an inner loop's frame on the stack and control
+       later reaches an enclosing loop's NEXT, the interpreter discards the
+       abandoned inner frame(s) and continues, as Multics does at run time
+       (the "For-next mismatch" of errata 044 is a compile-time nesting check,
+       not a run-time fault).  The previous strict top-of-stack match faulted
+       legal programs -- e.g. Explore's abbreviation expander, which jumps out
+       of an inner FOR to expand a match.
      - STOP and END now terminate the whole program even when reached inside a
        called BASIC subroutine (previously they ended only the subroutine).
      - An indented REM (line number followed by more than one space) is now
