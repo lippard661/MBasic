@@ -1,7 +1,7 @@
 package MBasic::Interp;
 use strict;
 use warnings;
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 use MBasic::Program;
 use MBasic::Linker;
 use MBasic::Registry;

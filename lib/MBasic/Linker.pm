@@ -1,7 +1,7 @@
 package MBasic::Linker;
 use strict;
 use warnings;
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 
 # ============================================================================
 #  MBasic::Linker -- resolve line-number references to IR indices and validate.

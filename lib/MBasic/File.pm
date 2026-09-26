@@ -1,7 +1,7 @@
 package MBasic::File;
 use strict;
 use warnings;
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 
 use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC);
 use Errno qw(EACCES EPERM EROFS ENOENT);

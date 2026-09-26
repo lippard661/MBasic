@@ -1,7 +1,7 @@
 package MBasic::Lexer;
 use strict;
 use warnings;
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 
 # ============================================================================
 #  MBasic::Lexer -- tokenize one source line of Multics BASIC (the Explore

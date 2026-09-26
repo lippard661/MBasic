@@ -1,5 +1,14 @@
 Revision history for MBasic
 
+1.2  2026-09-26
+     Correctness fix at request of Jim Lippard by Claude Opus 5.0:
+     - arg$(n) with n below 1 now reads as the empty string.  The 1-based
+       index had been applied directly to the Perl argument array, where a
+       zero or negative subscript wrapped around and returned a real argument
+       from the END of the list (arg$(0) gave the last one) instead of
+       nothing.  A program that indexes arg$ by a computed value could
+       silently read the wrong argument; 1..cnt is unaffected.
+
 1.1  2026-09-19
      Correctness and fidelity fixes from an external code review (Claude
      Opus 5.0).

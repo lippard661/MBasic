@@ -1,7 +1,7 @@
 package MBasic::Expr;
 use strict;
 use warnings;
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 
 # The source line number of the statement currently being evaluated.  The
 # executor sets this before each statement so that run-time errors raised deep
@@ -238,7 +238,7 @@ sub eval {
         }
         if ($op eq '^') {
             # Multics reports these as run-time errors rather than returning
-            # Inf/NaN the way Perl's ** does (errata 095/096/121).
+            # Inf/NaN the way Perl's ** does (errata 095/096/1.2).
             if ($a == 0) {
                 _rt("Zero power of zero")     if $b == 0;
                 _rt("Negative power of zero")  if $b < 0;

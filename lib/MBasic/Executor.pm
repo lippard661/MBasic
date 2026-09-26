@@ -5,7 +5,7 @@ use warnings;
 # bounded explicitly by $MAX_CALL_DEPTH below, so Perl's cosmetic
 # "Deep recursion" warning (which fires at 100 frames) is not wanted.
 no warnings 'recursion';
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 use MBasic::Expr;
 use MBasic::Env;
 use MBasic::Arg;
@@ -176,7 +176,7 @@ sub exec_stmt {
             if ($s->{kind} eq 'gosub') { push @{$rs->{gosubstk}}, $rs->{pc}+1; }
             $rs->{pc} = $target; return 1;
         }
-        # out of range is an error on Multics (errata 101), NOT a fall-through
+        # out of range is an error on Multics (errata 1.2), NOT a fall-through
         # (verified live: "On evaluated out of range").
         die "On evaluated out of range (line $s->{line})\n";
     }

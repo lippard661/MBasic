@@ -2,7 +2,7 @@ package MBasic;
 use strict;
 use warnings;
 
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 
 1;
 
@@ -253,7 +253,7 @@ search path.
 
 =head1 VERSION
 
-Version 1.1.
+Version 1.2.
 
 =head1 AUTHOR
 

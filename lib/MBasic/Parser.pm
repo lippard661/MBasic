@@ -1,7 +1,7 @@
 package MBasic::Parser;
 use strict;
 use warnings;
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 use MBasic::Lexer;
 use MBasic::Expr;
 

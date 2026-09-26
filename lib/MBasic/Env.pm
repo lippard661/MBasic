@@ -1,7 +1,7 @@
 package MBasic::Env;
 use strict;
 use warnings;
-our $VERSION = '1.1';
+our $VERSION = '1.2';
 
 # ============================================================================
 #  MBasic::Env -- a program unit's runtime variable environment.
@@ -155,7 +155,13 @@ sub is_special { my ($self, $name) = @_; defined $self->_special($name) ? 1 : 0;
 
 # ---- run-context accessors used by the evaluator for cnt / arg$ ----
 sub arg_count { my ($self) = @_; scalar @{$self->{argv}} }
-sub arg_at    { my ($self, $n) = @_;                 # 1-based per BASIC arg$(n)
+# arg$(n) is 1-based.  An index below 1 must be rejected BEFORE it reaches the
+# Perl array: $argv[$n-1] with $n <= 0 is a negative subscript, which silently
+# wraps to the end of the list and hands back a real (but wrong) argument
+# instead of failing.  Out of range in either direction reads as the empty
+# string, the same as an unset string variable.
+sub arg_at    { my ($self, $n) = @_;
+                return '' if $n < 1;
                 my $v = $self->{argv}[$n-1]; defined $v ? $v : '' }
 
 # ---- scalar read ----
@@ -268,6 +274,12 @@ undeclared arrays default to bound 10 per dimension.
 
 Constructor.  Options: C<argv> (arrayref, for C<arg$>/C<cnt>), C<user> (for
 C<usr$>), C<now> (a fixed epoch time making C<dat$>/C<clk$> deterministic).
+
+=head2 arg_count / arg_at($n)
+
+The run-context accessors behind the C<cnt> and C<arg$(n)> built-ins.
+C<arg_at> is 1-based, as C<arg$> is in BASIC; an index outside
+C<1 .. arg_count> returns the empty string.
 
 =head2 get_scalar($name) / set_scalar($name, $value)
 

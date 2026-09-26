@@ -74,4 +74,21 @@ my $w = ev('d + int(13 * (m + 1) / 5) + k + int(k / 4) + int(c / 4) + 5 * c', $e
 $w = $w - 7 * int($w/7);
 ok(defined $w, "Zeller w computed = $w");
 
+# --- command-line arguments: cnt and arg$(n) ---
+{
+    my $a = MBasic::Env->new(argv => ['-first', '-second', '-last']);
+    is(ev('cnt', $a),      3,         'cnt counts the supplied arguments');
+    is(ev('arg$(1)', $a),  '-first',  'arg$ is 1-based');
+    is(ev('arg$(3)', $a),  '-last',   'arg$ reaches the last argument');
+    is(ev('arg$(4)', $a),  '',        'arg$ past the end is the empty string');
+    # A subscript below 1 must not become a negative Perl index, which would
+    # wrap around and hand back a real argument from the end of the list.
+    is(ev('arg$(0)', $a),  '',        'arg$(0) is empty, not the last argument');
+    is(ev('arg$(0-1)', $a),'',        'a negative arg$ index is empty too');
+
+    my $none = MBasic::Env->new;
+    is(ev('cnt', $none),     0,  'cnt is 0 with no arguments');
+    is(ev('arg$(1)', $none), '', 'arg$ with no arguments is empty');
+}
+
 done_testing;
