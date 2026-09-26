@@ -434,10 +434,12 @@ sub _call_basic_sub {
     # bind parameters: copy the argument's current value INTO the sub's param
     # variable (copy-in).  For string params this is the "copied in at entry"
     # rule; for numeric, pass-by-value-in.  Write-back happens at subend.
+    my @entry;
     for my $i (0 .. $#$params) {
         my $pname = $params->[$i];
         my $val   = $args->[$i]->get;
         $sub_env->set_scalar($pname, $val);
+	$entry[$i] = $sub_env->get_scalar($pname);  # post-coercion
     }
 
     # run the sub's program unit from its entry index to subend
@@ -477,6 +479,7 @@ sub _call_basic_sub {
     # back all params (numeric write-back to a value arg is a harmless no-op).
     for my $i (0 .. $#$params) {
         my $final = $sub_env->get_scalar($params->[$i]);
+	next if $final eq $entry[$i];
         $args->[$i]->set($final);
     }
     return;
