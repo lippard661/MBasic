@@ -8,6 +8,19 @@ Revision history for MBasic
        from the END of the list (arg$(0) gave the last one) instead of
        nothing.  A program that indexes arg$ by a computed value could
        silently read the wrong argument; 1..cnt is unaffected.
+     - DIM is a declaration, not an executable statement.  The arrays a
+       program unit declares are now allocated at their declared bounds when
+       the unit is entered, and a DIM reached during execution has no effect
+       (AM82-01 p. 5-9: "a dim statement has no effect when executed").
+       Executing DIM got this wrong in both directions: an array touched
+       before control reached its DIM was auto-created at the default bound
+       10, and reaching the DIM afterwards re-allocated it and erased
+       whatever the program had stored.  Explore's "-abbrev NAME" hit both --
+       the abbreviations are read during argument processing, before the DIM
+       block is reached, so a file of more than ten entries faulted and a
+       shorter one was silently wiped a moment later.  A bound that is not a
+       constant (which Multics does not permit) cannot be resolved at entry
+       and is still declared by the statement when it is reached.
 
 1.1  2026-09-19
      Correctness and fidelity fixes from an external code review (Claude

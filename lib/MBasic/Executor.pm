@@ -55,12 +55,45 @@ sub _warn_from_interp {
 }
 
 # A RunState is the per-program-unit execution context.
+# Allocate the arrays a program unit declares with `dim`.
+#
+# On Multics `dim` is a DECLARATION handled when the unit is compiled -- the
+# manual (AM82-01 p. 5-9) is explicit that "a dim statement has no effect when
+# executed".  So the arrays must already exist, at their declared bounds, from
+# the moment the unit starts running, wherever the dim statements happen to sit
+# in the line ordering.  Executing them instead got this wrong twice over: an
+# array touched before control reached its dim was auto-created at the default
+# bound 10, and reaching the dim later re-allocated (and so erased) whatever
+# the program had stored.
+#
+# Only constant bounds can be resolved this early, which is all Multics allows.
+# A non-constant bound is left to the run-time statement below, which still
+# declares an array that does not exist yet.
+sub _predeclare_dims {
+    my ($class, $prog, $env) = @_;
+    return unless $prog && $env;
+    for my $s (@{ $prog->{ir} }) {
+        next unless $s->{op} eq 'dim';
+        DECL: for my $d (@{ $s->{decls} }) {
+            my @b;
+            for my $bn (@{ $d->{bounds} }) {
+                next DECL unless $bn->{k} eq 'num';   # not a constant: leave it
+                push @b, int($bn->{v});
+            }
+            $env->declare_array($d->{name}, \@b);
+        }
+    }
+    return;
+}
+
 sub new_runstate {
     my ($class, %opt) = @_;
     my $prog = $opt{program};
+    my $env  = $opt{env} // MBasic::Env->new(%opt);
+    $class->_predeclare_dims($prog, $env);
     return {
         program  => $prog,
-        env      => $opt{env} // MBasic::Env->new(%opt),
+        env      => $env,
         pc       => 0,
         forstk   => [],           # [ {var,limit,step,top_idx} ... ]
         gosubstk => [],           # [ return_idx ... ]
@@ -146,8 +179,16 @@ sub exec_stmt {
         return 0;
     }
 
+    # `dim` has no effect when executed (AM82-01 p. 5-9): the unit's arrays
+    # were allocated at entry by _predeclare_dims.  Re-declaring here would
+    # erase the array's contents, which is what broke Explore's "-ab NAME"
+    # (abbreviations are loaded during argument processing, then control
+    # reaches the dim statements and wiped them).  An array with a
+    # non-constant bound could not be resolved at entry, so declare that one
+    # now -- but still only if it does not exist yet.
     if ($op eq 'dim') {
         for my $d (@{$s->{decls}}) {
+            next if $env->has_array($d->{name});
             my @b = map { int(MBasic::Expr->eval($_, $env)) } @{$d->{bounds}};
             $env->declare_array($d->{name}, \@b);
         }

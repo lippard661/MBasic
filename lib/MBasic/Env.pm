@@ -190,6 +190,13 @@ sub set_scalar {
 # ---- dim: declare an array with given dimension bounds ----
 # dims are the DECLARED upper bounds; BASIC arrays are 0..bound inclusive.
 # declare('a', [75]) ; declare('b', [100,6]) ; declare('c$', [100])
+# has this array been declared (by dim, or auto-created on first use)?
+sub has_array {
+    my ($self, $name) = @_;
+    my $store = _is_string_name($name) ? $self->{sarray} : $self->{narray};
+    return exists $store->{$name} ? 1 : 0;
+}
+
 sub declare_array {
     my ($self, $name, $bounds) = @_;
     my $store = _is_string_name($name) ? $self->{sarray} : $self->{narray};

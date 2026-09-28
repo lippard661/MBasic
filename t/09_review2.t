@@ -177,4 +177,47 @@ like(err(['10 call "../secret/x": a', '20 end']),
          qr/^Next without for/, 'R4 next with no loop at all still errors');
 }
 
+# ==== R5: `dim` is a declaration, with no effect when executed ====
+# AM82-01 p. 5-9.  The arrays a unit declares exist at their declared bounds
+# from the moment it starts, wherever the dim statements sit in the ordering.
+# Executing dim instead broke Explore's "-ab NAME" both ways: abbreviations
+# are loaded during argument processing, BEFORE control ever reaches the dim
+# statements (so the arrays were auto-created at bound 10), and then the dims
+# ran and erased whatever had been stored.
+{
+    is(run(['10 dim q(75)', '20 let q(5) = 42', '30 goto 50',
+            '40 rem', '50 dim q(75)', '60 print q(5)', '70 end']),
+       " 42 \n", 'R5 re-executing dim does not erase the array');
+
+    is(run(['10 goto 40', '20 dim z(600)', '30 goto 60',
+            '40 let z(500) = 1', '50 goto 20',
+            '60 print z(500)', '70 end']),
+       " 1 \n", 'R5 an array is at its declared bound before its dim is reached');
+
+    # the declared bounds are still enforced
+    like(err(['10 dim s(5)', '20 let s(9) = 1', '30 end']),
+         qr/^Subscript out of bounds/, 'R5 declared bounds still checked');
+
+    # an undeclared array still defaults to bound 10
+    like(err(['10 let u(11) = 1', '20 end']),
+         qr/^Subscript out of bounds/, 'R5 undeclared array still defaults to 10');
+
+    # a non-constant bound cannot be resolved at entry, so the statement still
+    # declares it when reached
+    is(run(['10 let n = 30', '20 dim v(n)', '30 let v(25) = 7',
+            '40 print v(25)', '50 end']),
+       " 7 \n", 'R5 a non-constant dim bound still works at run time');
+
+    # each call gets its own arrays, and a sub's dim does not wipe the caller's
+    my $helper = ['10 sub "fill": r', '20 dim w(20)', '30 let w(3) = 9',
+                  '40 let r = w(3)', '50 subend'];
+    my $interp = MBasic::Interp->new;
+    $interp->load_helper_lines($helper, 'H');
+    $interp->load_helper_lines(['10 dim w(20)', '20 let w(3) = 5',
+                                '30 call "fill": k', '40 print w(3);k', '50 end'], 'M');
+    $interp->{main} = $interp->{programs}{M};
+    my $out = ''; $interp->run(out => sub { $out .= $_[0] });
+    is($out, " 5  9 \n", 'R5 a called sub gets its own dimmed arrays');
+}
+
 done_testing;
