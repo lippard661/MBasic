@@ -17,14 +17,17 @@ native helpers and supplies the game data.
 
 INSTALLATION FROM OPENBSD PACKAGE
 
-The p5-MBasic-1.1.tgz file is a Legion of Dynamic Discord-signed
-OpenBSD package which can be installed on OpenBSD with pkg_add and can
-also be installed on macOS or Linux using my install.pl script which
-can be found in this repo:
+A Legion of Dynamic Discord-signed OpenBSD package is distributed from:
+
+https://www.discord.org/lippard/software/OpenBSD-packages/
+
+Install it on OpenBSD with pkg_add.  The package is architecture-
+independent, so the same file also installs on macOS or Linux using my
+install.pl script:
 
 https://github.com/lippard661/distribute
 
-Ihe public key for the signing key is:
+The public key for the signing key is:
 
 https://www.discord.org/lippard/software/discord.org-2026-pkg.pub
 

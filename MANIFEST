@@ -1,4 +1,10 @@
 Changes
+LICENSE
+MANIFEST
+META.json                                Module JSON meta-data (added by MakeMaker)
+META.yml                                 Module YAML meta-data (added by MakeMaker)
+Makefile.PL
+README.md
 lib/MBasic.pm
 lib/MBasic/Arg.pm
 lib/MBasic/Env.pm
@@ -11,10 +17,6 @@ lib/MBasic/Linker.pm
 lib/MBasic/Parser.pm
 lib/MBasic/Program.pm
 lib/MBasic/Registry.pm
-LICENSE
-Makefile.PL
-MANIFEST
-README
 t/01_lexer.t
 t/02_expr_parse.t
 t/03_eval.t
@@ -23,5 +25,6 @@ t/05_executor.t
 t/06_call.t
 t/07_files.t
 t/08_review_fixes.t
-META.yml                                 Module YAML meta-data (added by MakeMaker)
-META.json                                Module JSON meta-data (added by MakeMaker)
+t/09_review2.t
+t/10_load_all.t
+t/11_manifest.t
