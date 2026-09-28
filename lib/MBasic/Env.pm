@@ -1,7 +1,7 @@
 package MBasic::Env;
 use strict;
 use warnings;
-our $VERSION = '1.2';
+our $VERSION = '1.3';
 
 # ============================================================================
 #  MBasic::Env -- a program unit's runtime variable environment.

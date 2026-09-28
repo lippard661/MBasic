@@ -1,7 +1,7 @@
 package MBasic::Registry;
 use strict;
 use warnings;
-our $VERSION = '1.2';
+our $VERSION = '1.3';
 
 # ============================================================================
 #  MBasic::Registry -- the native-builtin table (generic mechanism).

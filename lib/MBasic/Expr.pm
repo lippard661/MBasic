@@ -1,7 +1,7 @@
 package MBasic::Expr;
 use strict;
 use warnings;
-our $VERSION = '1.2';
+our $VERSION = '1.3';
 
 # The source line number of the statement currently being evaluated.  The
 # executor sets this before each statement so that run-time errors raised deep

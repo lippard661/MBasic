@@ -5,7 +5,7 @@ use warnings;
 # bounded explicitly by $MAX_CALL_DEPTH below, so Perl's cosmetic
 # "Deep recursion" warning (which fires at 100 frames) is not wanted.
 no warnings 'recursion';
-our $VERSION = '1.2';
+our $VERSION = '1.3';
 use MBasic::Expr;
 use MBasic::Env;
 use MBasic::Arg;
