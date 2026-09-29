@@ -72,6 +72,35 @@ is(run('10 let s = 0','20 for i = 1 to 5','30 let s = s + i','40 next i',
 # --- comma print zones (15-col) ---
 is(run('10 print "a","b"','20 end'), "a" . (" " x 14) . "b\n", 'comma zone to col 15');
 
+# --- the print column is reset by a terminal read ---
+# The user's RETURN is echoed by the terminal, leaving the cursor at column 0,
+# so a print after an input must start its comma zones from 0.  It used to
+# carry on from wherever output had reached before the prompt, which pulled
+# every zone after the first short -- visible in Explore's "whom" table, whose
+# comma-printed header follows an `input` and so failed to line up with its
+# comma-printed rows.
+sub run_in {
+    my ($lines, @answers) = @_;
+    my $prog = MBasic::Program->load_lines($lines, '(test)');
+    MBasic::Linker->link_program($prog);
+    my $out = '';
+    MBasic::Executor->run_program($prog,
+        out   => sub { $out .= $_[0] },
+        input => sub { shift @answers });
+    return $out;
+}
+{
+    my $clean = run('10 print "a","b"', '20 end');
+    for my $kind ('input', 'linput') {
+        my $after = run_in(['10 print "Request";', "20 $kind q\$",
+                            '30 print "a","b"', '40 end'], 'x');
+        $after =~ s/\A.*?\? //s;          # drop the prompt line
+        is($after, $clean, "comma zones start from column 0 after $kind");
+    }
+    # a print that does NOT follow a read is unaffected
+    is($clean, "a" . (" " x 14) . "b\n", 'zones unchanged without a read');
+}
+
 
 # --- on out of range is an error (Multics errata 101), not fall-through ---
 eval { run('10 let k = 5','20 on k goto 100,200','100 print "a"','200 print "b"','300 end') };

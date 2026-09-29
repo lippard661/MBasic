@@ -1,8 +1,21 @@
 Revision history for MBasic
 
 1.3  2026-09-28
-     Correctness fix at request of Jim Lippard by Claude Opus 5.0, from a
-     report by a user porting the distribution to Windows:
+     Correctness fixes at request of Jim Lippard by Claude Opus 5.0:
+     - The print column is reset when a terminal INPUT or LINPUT reads a
+       line.  The user's RETURN is echoed by the terminal, leaving the cursor
+       at column 0, but the column tracker kept whatever value output had
+       reached before the "? " prompt (which was itself written straight to
+       the output sink, uncounted).  The next PRINT then computed its comma
+       zones from that stale column, so every zone after the first came out
+       short by however far along the line the prompt had been.  Explore's
+       "whom" table showed it plainly: header and rows are both printed with
+       commas and should line up, but the header follows an INPUT, so its
+       headings landed seven columns early.  (Numeric columns still sit one
+       place right of a string heading -- that is the sign position, and is
+       correct.)
+
+     From a report by a user porting the distribution to Windows:
      - DIM is a declaration, not an executable statement.  The arrays a
        program unit declares are now allocated at their declared bounds when
        the unit is entered, and a DIM reached during execution has no effect

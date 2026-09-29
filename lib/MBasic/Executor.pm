@@ -587,6 +587,25 @@ sub _file_at_end {
 #  STDIN.  `linput` assigns the whole line to one string var; `input` splits
 #  the line on commas into the (possibly multiple) variables, coercing numeric
 #  targets.  The prompt "? " is printed before reading (BASIC input prompt).
+# Read one line in answer to a terminal prompt, and reset the print column.
+#
+# The user's RETURN is echoed by the terminal, so once the line has been read
+# the cursor is back at column 0.  Without this the column tracker keeps
+# whatever value output had reached before the prompt, and the next `print`
+# computes its comma zones from there -- so the zones come out short by
+# however far along the line the prompt happened to be.
+#
+# Explore's "whom" table is where this shows: the header and the rows are both
+# printed with commas and should line up, but the header follows an `input`,
+# so it started its zones from a stale column and every heading after the
+# first landed early.
+sub _read_terminal_line {
+    my ($class, $rs, $getline) = @_;
+    my $line = $getline->();
+    $rs->{col} = 0;
+    return $line;
+}
+
 sub _do_terminal_input {
     my ($class, $rs, $s) = @_;
     my $getline = $rs->{input} // sub {
@@ -598,7 +617,7 @@ sub _do_terminal_input {
         # Terminal linput DOES print the "? " prompt (manual: "Each time a
         # string value is required, a prompt is printed").
         $rs->{out}->("? ");
-        my $line = $getline->();
+        my $line = $class->_read_terminal_line($rs, $getline);
         $line = '' unless defined $line;
         chomp $line if defined $line;
         $class->_assign($rs, $s->{var}, $line);
@@ -610,13 +629,13 @@ sub _do_terminal_input {
     # defaulting the missing variables to 0/"".
     my $nvars = scalar @{$s->{vars}};
     $rs->{out}->("? ");
-    my $line = $getline->();
+    my $line = $class->_read_terminal_line($rs, $getline);
     _rt_line("Not enough input, add more", $s->{line}) unless defined $line;
     chomp $line;
     my @fields = split /,/, $line, -1;
     while (@fields < $nvars) {
         $rs->{out}->("Not enough input, add more\n? ");
-        my $more = $getline->();
+        my $more = $class->_read_terminal_line($rs, $getline);
         _rt_line("Not enough input, add more", $s->{line}) unless defined $more;
         chomp $more;
         push @fields, split /,/, $more, -1;
