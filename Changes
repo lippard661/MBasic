@@ -15,7 +15,7 @@ Revision history for MBasic
        place right of a string heading -- that is the sign position, and is
        correct.)
 
-     From a report by a user porting the distribution to Windows:
+     Found and reported by Gunther Schmidl, who ported the game to Windows:
      - DIM is a declaration, not an executable statement.  The arrays a
        program unit declares are now allocated at their declared bounds when
        the unit is entered, and a DIM reached during execution has no effect
