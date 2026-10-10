@@ -1,5 +1,20 @@
 Revision history for MBasic
 
+1.4  2026-10-09
+     Correctness fix at request of Jim Lippard by Claude Opus 5.0:
+     - Terminal LINPUT ends the run when the input is exhausted, instead of
+       returning an endless supply of empty lines.  INPUT already reported
+       "Not enough input, add more" on exhaustion; LINPUT did
+       "$line = '' unless defined $line", so a program with a command loop
+       -- Explore's main loop is exactly that -- spun at its prompt forever
+       once stdin closed, at 99% CPU and with unbounded "? " output, after
+       something as ordinary as feeding the game a command file, or a shell
+       escape that consumed the rest of stdin.  LINPUT now reports the same
+       condition, in the same words, at the same point.  An empty line is
+       still real input and is still delivered as the empty string; only
+       exhaustion ends the run.  The question could not arise on Multics,
+       where a terminal has no end of file and a hangup killed the process.
+
 1.3  2026-09-28
      Correctness fixes at request of Jim Lippard by Claude Opus 5.0:
      - The print column is reset when a terminal INPUT or LINPUT reads a
