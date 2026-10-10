@@ -618,8 +618,17 @@ sub _do_terminal_input {
         # string value is required, a prompt is printed").
         $rs->{out}->("? ");
         my $line = $class->_read_terminal_line($rs, $getline);
-        $line = '' unless defined $line;
-        chomp $line if defined $line;
+        # Exhausted input is NOT an empty line.  Treating it as one hands a
+        # program that loops reading commands -- Explore's main loop is
+        # exactly that -- an endless supply of empty strings, so it spins at
+        # the prompt forever (99% CPU, unbounded "? " output) instead of
+        # stopping.  `input` below already ends the run when the input runs
+        # out; report the same condition here, in the same words, so the two
+        # read statements behave alike.  On Multics the question could not
+        # arise: a terminal has no end of file, and a hangup killed the
+        # process outright.
+        _rt_line("Not enough input, add more", $s->{line}) unless defined $line;
+        chomp $line;
         $class->_assign($rs, $s->{var}, $line);
         return 0;
     }

@@ -28,3 +28,4 @@ t/08_review_fixes.t
 t/09_review2.t
 t/10_load_all.t
 t/11_manifest.t
+t/12_eof.t
